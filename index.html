@@ -1941,6 +1941,36 @@ function backupBlob(){
   const body={ app:BACKUP_TAG, v:SCHEMA, at:today(), state:S };
   return new Blob([JSON.stringify(body)], {type:"application/json"});
 }
+/* 読み込みは「足すだけ」。いまある記録は書き換えない。
+
+   バックアップで上書きしてしまうと、書き出したあとに積み上げた記録が
+   消える。それでは控えを取る意味がなくなる。そこで、この端末に無い
+   記録だけを足す。同じ id のものは、この端末のほうを残す
+   （こちらで直したかもしれないため）。
+
+   ただし、この端末にまだ何も無いとき（端末を替えたときなど）は、
+   足すも上書きも同じことなので、そのまま入れる。 */
+function backupDiff(st){
+  const fresh = !S.student && !S.tasks.length && !S.goals.length;
+  const gid=new Set(S.goals.map(g=>g.id));
+  const tid=new Set(S.tasks.map(t=>t.id));
+  return { fresh,
+    goals:(st.goals||[]).filter(g=>g && g.id && !gid.has(g.id)),
+    tasks:(st.tasks||[]).filter(t=>t && t.id && !tid.has(t.id)) };
+}
+function applyBackup(st, d){
+  if(d.fresh){
+    S=st;
+    unlocked=true;                           // バックアップのパスコードで締め出さない
+    rollGrade();
+    advanceGarden();
+    return;
+  }
+  S.goals=S.goals.concat(d.goals);
+  S.tasks=S.tasks.concat(d.tasks);
+  /* 足した記録のぶんだけ、花壇も進める */
+  advanceGarden(d.tasks.reduce((p,t)=>p+growthOf(t), 0));
+}
 /* 読み込んだものが、確かにこのアプリのバックアップかを見てから受け取る。 */
 function parseBackup(text){
   let raw;
@@ -1954,7 +1984,27 @@ function parseBackup(text){
     : "バックアップの中身を読み取れませんでした。"};
   return {state:r.state};
 }
-/* バックアップの書き出しは、設定からも卒業の画面からも押せる。 */
+/* PDFの書き出し。記録シートの画面からも、卒業の画面からも押せる。 */
+function downloadSheetPdf(r, ready){
+  let pages=ready||null;                     // 画面に出した下絵があれば、それを使い回す
+  if(!pages){
+    try{ pages=sheetPages(r); }
+    catch(e){ console.error(e); return toast("シートを作れませんでした"); }
+  }
+  let blob;
+  try{ blob=pdfFromCanvases(pages); }
+  catch(e){ console.error(e); return toast("PDFを作れませんでした"); }
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download=`学習記録-${r.from}〜${r.to}.pdf`;
+  /* download を分かる端末はファイルとして保存し、分からない端末は
+     target のおかげでその場で開く。押す手順はどちらも同じ1回。 */
+  a.target="_blank"; a.rel="noopener";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+  toast(`PDFを作りました（${pages.length}ページ）`);
+}
+/* バックアップの書き出しは設定から。 */
 async function downloadBackup(){
   let url;
   try{ url=URL.createObjectURL(backupBlob()); }
@@ -1991,7 +2041,8 @@ function viewSet(){
   <button class="btn ghost" id="bk">バックアップを書き出す</button>
   <div class="hint">いまの記録（${counts}）を1つのファイルに書き出します。
   ${S.settings.backupAt? `前回の書き出し：${fmt(S.settings.backupAt,true)}` : "まだ書き出していません。"}</div>
-  <button class="btn ghost" id="rest">バックアップから戻す</button>
+  <button class="btn ghost" id="rest">バックアップを読み込む</button>
+  <div class="hint">この端末に無い記録だけを足します。いまある記録は書き換えません。</div>
   <input type="file" id="file" accept="application/json,.json" class="hidden">
   <div class="note"><b>記録はこの端末の中にしかありません。</b>
   端末を替えたときや、しばらく開かずに端末の掃除で消えたときは、バックアップがないと戻せません。
@@ -2030,19 +2081,22 @@ function viewSet(){
     catch(err){ console.error(err); return toast("ファイルを開けませんでした"); }
     const r=parseBackup(text);
     if(r.error) return toast(r.error);
-    const st=r.state;
-    const ok=await ask("このバックアップに入れ替えますか",{
-      body:`バックアップの中身：やること ${st.tasks.length}件・目標 ${st.goals.length}件`
-        +`（${(st.student&&st.student.name)||"名前なし"}）。`
-        +`いまの記録（${counts}）は消えて、バックアップの中身に入れ替わります。`,
-      okLabel:"入れ替える", danger:true});
+    const st=r.state, d=backupDiff(st);
+    if(!d.fresh && !d.goals.length && !d.tasks.length)
+      return toast("足せる記録はありませんでした（すべてこの端末にあります）");
+    const ok=await ask(d.fresh? "このバックアップを入れますか" : "足りない記録を足しますか",{
+      body: d.fresh
+        ? `この端末にはまだ記録がありません。バックアップの中身`
+          +`（やること ${st.tasks.length}件・目標 ${st.goals.length}件`
+          +`／${(st.student&&st.student.name)||"名前なし"}）をそのまま入れます。`
+        : `足すのは、この端末に無い やること ${d.tasks.length}件・目標 ${d.goals.length}件です。`
+          +`いまある記録（${counts}）は、書き換えも削除もしません。`,
+      okLabel: d.fresh? "入れる" : "足す"});
     if(!ok) return;
-    S=st;
-    unlocked=true;                           // バックアップのパスコードで締め出さない
-    rollGrade();
-    advanceGarden();
+    applyBackup(st, d);
     await saveNow();
-    toast("バックアップから戻しました");
+    toast(d.fresh? "バックアップを入れました"
+        : `やること${d.tasks.length}件・目標${d.goals.length}件を足しました`);
     go("today");
   };
   $("#rs").onclick=async()=>{
@@ -2069,17 +2123,16 @@ function viewGraduated(){
     <div class="stat"><span>育てきった株</span><b>${grown}</b></div>
   </div>
   <div class="note">プランメイトは、中学生・高校生のためのアプリです。
-  高校の3年間が終わったので、ここまでとします。<br>
-  見積もって、やって、ずれを見る。この続け方は、アプリがなくても使えます。</div>
+  高校の3年間が終わったので、ここまでとします。</div>
   <p class="sec">記録の持ち出し</p>
-  <button class="btn" id="bk">バックアップを書き出す</button>
-  <div class="hint">これまでの記録をファイルに書き出せます。手元に残しておいてください。</div>
+  <button class="btn" id="pdf">これまでの記録をPDFにする</button>
+  <div class="hint">はじめて記録した日から今日までを、1つのPDFにまとめます。</div>
   <button class="btn quiet" id="rs">すべて消して、はじめからやり直す</button>
   <div class="hint">学年をまちがえて入れていた場合は、ここからやり直せます。記録は消えます。</div>`;
-  $("#bk").onclick=downloadBackup;
+  $("#pdf").onclick=()=>downloadSheetPdf(allRange());
   $("#rs").onclick=async()=>{
     if(await ask("すべての記録を消しますか",{
-      body:"元に戻せません。先にバックアップを書き出しておくと、あとから戻せます。",
+      body:"元に戻せません。先にPDFにしておくと、記録は手元に残せます。",
       danger:true, okLabel:"消す"})){
       S=blank(); advanceGarden(); unlocked=true; await saveNow(); go("today");
     }
@@ -2479,26 +2532,9 @@ function viewSheet(){
       `<img class="pdfpage" src="${c.toDataURL("image/jpeg",0.7)}" alt="${i+1}ページ目">`
       +`<div class="pdfnote">${i+1} / ${pages.length} ページ</div>`).join("");
   },30);
-  const withPdf=fn=>{
-    const pages=build(); if(!pages) return;
-    let blob;
-    try{ blob=pdfFromCanvases(pages); }
-    catch(e){ console.error(e); return toast("PDFを作れませんでした"); }
-    fn(blob, pages.length);
-  };
   /* ボタンは1つ。端末によって保存になるか、その場で開くかが変わるだけで、
      こちらからできることは同じ（PDFを作って渡す）なので、分けない。 */
-  $("#pdf").onclick=()=>withPdf((blob,n)=>{
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");
-    a.href=url; a.download=`学習記録-${r.from}〜${r.to}.pdf`;
-    /* download を分かる端末はファイルとして保存し、分からない端末は
-       target のおかげでその場で開く。押す手順はどちらも同じ1回。 */
-    a.target="_blank"; a.rel="noopener";
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),60000);
-    toast(`PDFを作りました（${n}ページ）`);
-  });
+  $("#pdf").onclick=()=>downloadSheetPdf(r, build());
 }
 
 /* ============================================================
