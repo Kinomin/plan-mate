@@ -138,7 +138,7 @@ nav#tabs.hide{display:none;}
 .newbadge{animation:rise .5s .35s cubic-bezier(.2,1.2,.4,1) both;}
 @keyframes rise{from{transform:translateY(10px);opacity:0;} to{transform:translateY(0);opacity:1;}}
 
-/* 花だん：記録した日に育つ。勉強した量では育たない。 */
+/* 花壇：記録するたびに育つ。勉強した時間の長さでは育たない。 */
 .garden{background:linear-gradient(#F4F7FB 0%,#FBFAF4 62%,#F0EADB 62%,#EDE5D2 100%);
   border:1px solid var(--rule);border-radius:14px;padding:8px 10px 4px;margin-bottom:12px;
   display:flex;align-items:flex-end;gap:12px;}
@@ -273,7 +273,7 @@ const Store = (() => {
    2. 状態
    ============================================================ */
 const APP_VERSION="2026.08.13-g";
-const SCHEMA=6;
+const SCHEMA=7;
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 const SUBJECTS=["国語","数学","英語","理科","社会","その他"];
@@ -294,6 +294,15 @@ function blank(){
     settings:{ weekdayMin:60, weekendMin:120 } };
 }
 const MIGRATIONS={
+  /* v6 → v7：花壇の育て方を変えた。
+     「記録した日ごとに1つ」から「記録するたびに1つ」へ。
+     数え方そのものが変わるので、これまでの点数は引き継げない。
+     咲いた花はそのまま残し、いま育てている株だけ、
+     いまの値から数え直す（base を消して、起動時に入れ直す）。 */
+  6(st){
+    if(st.garden && st.garden.current) delete st.garden.current.base;
+    return st;
+  },
   /* v5 → v6：目標の数字（点数・偏差値・単位）をやめて、備考にまとめた。
      入力が細かくなりすぎ、単位によっては「いまの分」のような
      意味の通らないラベルになってしまったため。
@@ -320,7 +329,7 @@ const MIGRATIONS={
     });
     return st;
   },
-  // v2 → v3：花だんの新設。
+  // v2 → v3：花壇の新設。
   2(st){
     if(!st.garden) st.garden={current:null, bloomed:[]};
     st.settings=st.settings||{};
@@ -515,7 +524,7 @@ function accuracyOf(t){ return Math.abs(t.actMin/t.estMin - 1); }
 const isHit=t=>accuracyOf(t)<=HIT+EPS;
 function verdictOf(t){
   const a=accuracyOf(t);
-  if(a<=HIT+EPS)  return {k:"hit",  mark:"🎯", lead:"ぴったり", sub:"見積りどおりでした"};
+  if(a<=HIT+EPS)  return {k:"hit",  mark:"🎯", lead:"的中", sub:"見積りどおりでした"};
   if(a<=NEAR+EPS) return {k:"near", mark:"👍", lead:"おしい",   sub:`ずれは${Math.round(a*100)}%でした`};
   const over=t.actMin>t.estMin;
   return {k:"far", mark:over?"🐢":"🐇", lead:over?"思ったより かかった":"思ったより 早かった",
@@ -547,15 +556,15 @@ function badgeInfo(){
     const devFirst=Math.abs(median(ratioList(l.slice(0,mid)))-1);
     const devSecond=Math.abs(median(ratioList(l.slice(mid)))-1);
     const devAll=Math.abs(median(ratioList(l))-1);
-    if(devAll<=0.15) out.push({id:"master", label:"見積り名人", mark:"🏅",
-      detail:`${l.length}件のずれは、真ん中の値で${Math.round(devAll*100)}%です。`});
+    if(devAll<=0.15) out.push({id:"master", label:"見積りが安定", mark:"🏅",
+      detail:`${l.length}件の誤差は、中央値で${Math.round(devAll*100)}%です。`});
     else if(devFirst-devSecond>=0.10) out.push({id:"growing", label:"上達中", mark:"📈",
-      detail:`前半のずれは${Math.round(devFirst*100)}%、後半は${Math.round(devSecond*100)}%。縮まっています。`});
+      detail:`前半の誤差は${Math.round(devFirst*100)}%、後半は${Math.round(devSecond*100)}%。縮まっています。`});
   }
-  const HT=[[1,"はじめてのぴったり","🎯"],[5,"ぴったり5回","🎯"],[10,"ぴったり10回","🎯"],[25,"ぴったり25回","🎯"]];
+  const HT=[[1,"初の的中","🎯"],[5,"的中5回","🎯"],[10,"的中10回","🎯"],[25,"的中25回","🎯"]];
   for(let i=HT.length-1;i>=0;i--){
     if(hits>=HT[i][0]){ out.push({id:"hit"+HT[i][0], label:HT[i][1], mark:HT[i][2],
-      detail:`見積りとのずれが${Math.round(HIT*100)}%以内だった回数：${hits}回。`}); break; }
+      detail:`見積りとの誤差が${Math.round(HIT*100)}%以内だった回数：${hits}回。`}); break; }
   }
   const RT=[[1,"立て直した","🌱"],[5,"立て直し5回","🌿"],[10,"立て直し10回","🌳"]];
   for(let i=RT.length-1;i>=0;i--){
@@ -566,23 +575,52 @@ function badgeInfo(){
 }
 
 /* ============================================================
-   花だん
-   育つのは「記録した日」。勉強した量や完了数では育たない。
-   ぴったりだった日は、もう1つぶん育つ。
-   種類ごとに咲くまでの日数が違い、咲いたら季節の次のタネが飛んでくる。
+   花壇
+
+   育つのは「記録するたび」。1日に何件記録しても、そのぶん育つ。
+   ただし勉強した時間の長さでは育たない。育てるのは、記録という行動。
+   誤差10%以内（＝的中）だった記録は、2倍のはやさで育つ。
+
+   育てられるのは、いつでも一株だけ。開花すると、その季節の
+   まだ咲かせていない種を次にまく。全20種。
+
+   種類ごとに開花までの必要量が違う。おおむね目標を2〜3件やりきる
+   （＝やることを10〜15件こなす）と、ひとつ咲く量にしてある。
    ============================================================ */
 const PLANTS={
-  sakurasou:{n:"さくらそう", s:"spring", cost:8,  petal:"#E58AAE", core:"#F2D24E", np:5,  rx:6, ry:8},
-  tulip    :{n:"チューリップ",s:"spring", cost:12, petal:"#D9342A", core:"#C9302A", np:3,  rx:7, ry:11},
-  asagao   :{n:"あさがお",   s:"summer", cost:8,  petal:"#6B5BC4", core:"#F7F3E4", np:6,  rx:8, ry:8},
-  himawari :{n:"ひまわり",   s:"summer", cost:16, petal:"#F2B01E", core:"#7A5230", np:14, rx:5, ry:11},
-  cosmos   :{n:"コスモス",   s:"autumn", cost:10, petal:"#E06A9A", core:"#F2D24E", np:8,  rx:5, ry:10},
-  kiku     :{n:"きく",       s:"autumn", cost:14, petal:"#E8B33A", core:"#C98F1E", np:16, rx:3, ry:11},
-  suisen   :{n:"すいせん",   s:"winter", cost:10, petal:"#F7F3E4", core:"#E8B33A", np:6,  rx:6, ry:9},
-  tsubaki  :{n:"つばき",     s:"winter", cost:16, petal:"#C9304A", core:"#F2D24E", np:6,  rx:9, ry:9}
+  /* 春 */
+  sakurasou:{n:"サクラソウ",   s:"spring", cost:13, petal:"#E58AAE", core:"#F2D24E", np:5,  rx:6,   ry:8,  shape:"notch"},
+  tulip    :{n:"チューリップ", s:"spring", cost:15, petal:"#D9342A", core:"#C9302A", np:3,  rx:7,   ry:11, shape:"cup"},
+  pansy    :{n:"パンジー",     s:"spring", cost:14, petal:"#6B4FA8", core:"#F2D24E", np:5,  rx:7.5, ry:8,  shape:"round"},
+  nemophila:{n:"ネモフィラ",   s:"spring", cost:12, petal:"#7FA9E8", core:"#FFFFFF", np:5,  rx:6.5, ry:7,  shape:"round"},
+  sweetpea :{n:"スイートピー", s:"spring", cost:16, petal:"#F0A7C8", core:"#F7F3E4", np:4,  rx:8.5, ry:9.5,shape:"round"},
+  /* 夏 */
+  asagao   :{n:"アサガオ",     s:"summer", cost:12, petal:"#6B5BC4", core:"#F7F3E4", np:5,  rx:8,   ry:8,  shape:"trumpet"},
+  himawari :{n:"ヒマワリ",     s:"summer", cost:19, petal:"#F2B01E", core:"#7A5230", np:16, rx:4,   ry:11, shape:"point"},
+  marigold :{n:"マリーゴールド",s:"summer",cost:15, petal:"#E8871E", core:"#C96A12", np:11, rx:5,   ry:8,  shape:"round", layers:2},
+  housenka :{n:"ホウセンカ",   s:"summer", cost:13, petal:"#E2557B", core:"#F7F3E4", np:5,  rx:7,   ry:7.5,shape:"round"},
+  yuri     :{n:"ユリ",         s:"summer", cost:18, petal:"#FFFBF0", core:"#D96A3A", np:6,  rx:6,   ry:12, shape:"point", edge:"#D9CFB4"},
+  /* 秋 */
+  cosmos   :{n:"コスモス",     s:"autumn", cost:13, petal:"#E06A9A", core:"#F2D24E", np:8,  rx:5,   ry:10, shape:"notch"},
+  kiku     :{n:"キク",         s:"autumn", cost:17, petal:"#E8B33A", core:"#C98F1E", np:15, rx:2.6, ry:11, shape:"thin", layers:2},
+  rindou   :{n:"リンドウ",     s:"autumn", cost:16, petal:"#4A54A8", core:"#F7F3E4", np:5,  rx:5.5, ry:10, shape:"cup"},
+  keitou   :{n:"ケイトウ",     s:"autumn", cost:15, petal:"#C9302A", core:"#8E2018", np:13, rx:3.4, ry:9,  shape:"thin", layers:2},
+  dahlia   :{n:"ダリア",       s:"autumn", cost:20, petal:"#C0407A", core:"#F2D24E", np:12, rx:4,   ry:10, shape:"point", layers:2},
+  /* 冬 */
+  suisen   :{n:"スイセン",     s:"winter", cost:13, petal:"#FFFBF0", core:"#E8B33A", np:6,  rx:6,   ry:9,  shape:"round", edge:"#D9CFB4"},
+  tsubaki  :{n:"ツバキ",       s:"winter", cost:18, petal:"#C9304A", core:"#F2D24E", np:6,  rx:8.5, ry:9,  shape:"round"},
+  cyclamen :{n:"シクラメン",   s:"winter", cost:17, petal:"#D6417E", core:"#B5306A", np:5,  rx:5,   ry:12, shape:"point"},
+  ume      :{n:"ウメ",         s:"winter", cost:12, petal:"#F2A8C4", core:"#E8B33A", np:5,  rx:6,   ry:6.5,shape:"round"},
+  roubai   :{n:"ロウバイ",     s:"winter", cost:14, petal:"#F0C040", core:"#A87A1E", np:6,  rx:5,   ry:6.5,shape:"round"}
 };
+const PLANT_IDS=Object.keys(PLANTS);
 const SEASON_JA={spring:"春",summer:"夏",autumn:"秋",winter:"冬"};
-const STAGES=["タネ","め","は","つぼみ","花"];
+const STAGES=["種","芽","本葉","つぼみ","花"];
+/* 各段階に入る位置（開花までの割合）。次の段階までを％で出すのに使う。 */
+const STAGE_CUT=[0, 0.15, 0.38, 0.66, 1];
+/* 記録1件につき1、誤差10%以内ならもう1。時間の長さでは増えない。 */
+const GROW_PER_RECORD=1, GROW_PER_HIT=1;
+
 function seasonOf(ds){
   const m=Number(ds.slice(5,7));
   if(m>=3&&m<=5) return "spring";
@@ -590,23 +628,33 @@ function seasonOf(ds){
   if(m>=9&&m<=11) return "autumn";
   return "winter";
 }
+/* 次の種を選ぶ。同じ季節の、まだ咲かせていない種を優先する。
+   その季節を集めきったら、季節の中から選び直す。 */
 function pickSeed(season, exclude){
-  const c=Object.keys(PLANTS).filter(k=>PLANTS[k].s===season && k!==exclude);
-  const pool=c.length? c : Object.keys(PLANTS);
+  const had=new Set(((S.garden&&S.garden.bloomed)||[]).map(b=>b.id));
+  const inSeason=PLANT_IDS.filter(k=>PLANTS[k].s===season && k!==exclude);
+  const fresh=inSeason.filter(k=>!had.has(k));
+  const pool=fresh.length? fresh : (inSeason.length? inSeason : PLANT_IDS);
   return pool[Math.floor(Math.random()*pool.length)];
 }
-/* これまでに積み上がった育ちのぶん。日単位で数えるので、
-   1日にたくさん記録しても稼げない。 */
+/* これまでに積み上がった育ちのぶん。記録した件数で数える。
+   1日に何件こなしても、こなしたぶんだけ育つ。 */
 function lifetimeGrowth(){
-  const rec=new Set(S.tasks.filter(t=>t.recordedAt).map(t=>t.recordedAt));
-  const hit=new Set(doneTasks().filter(isHit).map(t=>t.doneAt).filter(Boolean));
   let p=0;
-  rec.forEach(d=>{ p+=1; if(hit.has(d)) p+=1; });
+  S.tasks.forEach(t=>{
+    if(!t.recordedAt) return;
+    p+=GROW_PER_RECORD;
+    if(t.done && t.estMin>0 && t.actMin>0 && isHit(t)) p+=GROW_PER_HIT;
+  });
   return p;
 }
-/* 咲いた花を確定させ、新しいタネを置く。咲いた花の一覧を返す。 */
+/* 咲いた花を確定させ、新しい種をまく。咲いた花の一覧を返す。 */
 function advanceGarden(){
   if(!S.garden) S.garden={current:null, bloomed:[]};
+  if(!S.garden.bloomed) S.garden.bloomed=[];
+  /* 数え方が変わった直後は、育てている株を今の値から数え直す。 */
+  if(S.garden.current && typeof S.garden.current.base!=="number")
+    S.garden.current.base=lifetimeGrowth();
   if(!S.garden.current)
     S.garden.current={id:pickSeed(seasonOf(today())), plantedAt:today(), base:lifetimeGrowth()};
   const newly=[];
@@ -625,14 +673,76 @@ function gardenState(){
   if(!S.garden||!S.garden.current) return null;
   const c=S.garden.current, pl=PLANTS[c.id];
   if(!pl) return null;
-  const pts=Math.max(0, lifetimeGrowth()-c.base);
+  const base=(typeof c.base==="number")? c.base : lifetimeGrowth();
+  const pts=Math.max(0, lifetimeGrowth()-base);
   const ratio=Math.min(1, pts/pl.cost);
-  const stage=ratio>=1?4 : ratio>=.72?3 : ratio>=.42?2 : ratio>0?1 : 0;
-  return {plant:pl, id:c.id, pts, need:pl.cost, ratio, stage, bloomed:S.garden.bloomed||[]};
+  let stage=0;
+  for(let i=STAGE_CUT.length-1;i>=0;i--){ if(ratio>=STAGE_CUT[i]-EPS){ stage=i; break; } }
+  /* 次の段階まで何％か。この％だけを見せ、「あと何件」は出さない。 */
+  let nextPct=100;
+  if(stage<4){
+    const from=STAGE_CUT[stage], to=STAGE_CUT[stage+1];
+    nextPct=Math.max(0, Math.min(99, Math.floor((ratio-from)/(to-from)*100)));
+  }
+  const bloomed=S.garden.bloomed||[];
+  return {plant:pl, id:c.id, pts, need:pl.cost, ratio, stage, nextPct,
+    next: stage<4? STAGES[stage+1] : null,
+    bloomed, kinds:new Set(bloomed.map(b=>b.id)).size};
 }
-/* 依存ゼロで描く。段階に応じて茎が伸び、最後に花が咲く。 */
+/* 依存ゼロで描く。段階に応じて茎が伸び、最後に花が咲く。
+   花のかたちは shape で分ける。20種を色数だけで区別すると、
+   どれも同じ花に見えてしまうため。 */
+function petalShape(pl){
+  const {rx,ry}=pl;
+  if(pl.shape==="point")
+    return `<path d="M0 0 C${-rx} ${-ry*0.7} ${-rx*0.72} ${-ry*1.95} 0 ${-ry*2.05}
+      C${rx*0.72} ${-ry*1.95} ${rx} ${-ry*0.7} 0 0 Z"/>`;
+  if(pl.shape==="notch")
+    return `<path d="M0 0 C${-rx*1.15} ${-ry*0.6} ${-rx} ${-ry*1.9} ${-rx*0.34} ${-ry*1.8}
+      L0 ${-ry*1.42} L${rx*0.34} ${-ry*1.8}
+      C${rx} ${-ry*1.9} ${rx*1.15} ${-ry*0.6} 0 0 Z"/>`;
+  if(pl.shape==="thin")
+    return `<rect x="${-rx}" y="${-ry*1.9}" width="${rx*2}" height="${ry*1.9}" rx="${rx}"/>`;
+  return `<ellipse cx="0" cy="${-ry*0.95}" rx="${rx}" ry="${ry}"/>`;
+}
+function bloomSVG(pl, cx, fy){
+  /* 淡い花は、そのままだと背景に沈む。縁取りを持つ種だけ線を足す。 */
+  const edge=pl.edge? ` stroke="${pl.edge}" stroke-width="0.9"` : "";
+  if(pl.shape==="cup"){
+    const w=pl.rx*1.6, h=pl.ry*1.7;
+    return `<path d="M${cx-w} ${fy-h} Q${cx-w} ${fy+h*0.55} ${cx} ${fy+h*0.6}
+      Q${cx+w} ${fy+h*0.55} ${cx+w} ${fy-h}
+      Q${cx+w*0.55} ${fy-h*0.68} ${cx+w*0.34} ${fy-h}
+      Q${cx} ${fy-h*0.55} ${cx-w*0.34} ${fy-h}
+      Q${cx-w*0.55} ${fy-h*0.68} ${cx-w} ${fy-h} Z" fill="${pl.petal}"${edge}/>`;
+  }
+  if(pl.shape==="trumpet"){
+    const r=pl.rx*1.5;
+    let s=`<circle cx="${cx}" cy="${fy}" r="${r}" fill="${pl.petal}"${edge}/>`;
+    for(let i=0;i<pl.np;i++){
+      const a=(360/pl.np)*i;
+      s+=`<line x1="${cx}" y1="${fy}" x2="${cx}" y2="${fy-r}" stroke="#ffffff" stroke-width="1"
+        opacity=".45" transform="rotate(${a.toFixed(1)} ${cx} ${fy})"/>`;
+    }
+    return s+`<circle cx="${cx}" cy="${fy}" r="${r*0.42}" fill="${pl.core}" opacity=".9"/>
+      <circle cx="${cx}" cy="${fy}" r="${r*0.16}" fill="${pl.petal}"/>`;
+  }
+  const shape=petalShape(pl);
+  const layers=pl.layers||1;
+  let s="";
+  for(let L=0;L<layers;L++){
+    const off=(360/pl.np)*(L/layers)/1;
+    const sc=L? 0.66 : 1;
+    for(let i=0;i<pl.np;i++){
+      const a=(360/pl.np)*i+off;
+      s+=`<g transform="translate(${cx} ${fy}) rotate(${a.toFixed(1)}) scale(${sc})" fill="${pl.petal}"${edge}
+        ${L? 'opacity=".92"':""}>${shape}</g>`;
+    }
+  }
+  return s+`<circle cx="${cx}" cy="${fy}" r="${pl.np>10?6:5}" fill="${pl.core}"/>`;
+}
 function plantSVG(id, stage, size){
-  const pl=PLANTS[id]; size=size||86;
+  const pl=PLANTS[id]||PLANTS.sakurasou; size=size||86;
   const W=72,H=104, soil=90, cx=36;
   const h=[0,16,38,58,68][stage];
   const top=soil-h;
@@ -646,41 +756,22 @@ function plantSVG(id, stage, size){
     if(stage>=2) s+=`<ellipse cx="${cx+10}" cy="${soil-h*0.66}" rx="10" ry="5" fill="#5C9A5C" transform="rotate(20 ${cx+10} ${soil-h*0.66})"/>`;
     if(stage===3) s+=`<ellipse cx="${cx}" cy="${top-4}" rx="6" ry="9" fill="${pl.petal}" opacity=".8"/>
       <path d="M${cx-6} ${top-1} Q${cx} ${top-12} ${cx+6} ${top-1}" stroke="#5C9A5C" stroke-width="2.4" fill="none"/>`;
-    if(stage>=4){
-      const fy=top-7;
-      for(let i=0;i<pl.np;i++){
-        const a=(360/pl.np)*i;
-        s+=`<ellipse cx="${cx}" cy="${fy-pl.ry*0.85}" rx="${pl.rx}" ry="${pl.ry}" fill="${pl.petal}"
-             transform="rotate(${a} ${cx} ${fy})"/>`;
-      }
-      s+=`<circle cx="${cx}" cy="${fy}" r="${pl.np>10?7:5.5}" fill="${pl.core}"/>`;
-    }
+    if(stage>=4) s+=bloomSVG(pl, cx, top-7);
   }
   return s+`</svg>`;
-}
-/* 今日ぶんの育ち。0＝まだ、1＝記録した、2＝ぴったりもあった。
-   1日にいくつ記録しても、ここは2で頭打ちになる。 */
-function todayGrowth(){
-  const td=today();
-  const rec=S.tasks.some(t=>t.recordedAt===td);
-  if(!rec) return 0;
-  return doneTasks().some(t=>t.doneAt===td && isHit(t))? 2 : 1;
 }
 function gardenCard(){
   const g=gardenState();
   if(!g) return "";
   const done=g.stage>=4;
-  const tg=todayGrowth();
-  const left=Math.max(0,g.need-g.pts);
   return `<div class="garden">${plantSVG(g.id,g.stage,78)}
     <div class="gtxt">
       <div class="gname">${g.plant.n}<span style="font-weight:400;color:var(--ink-faint);font-size:11px">　${SEASON_JA[g.plant.s]}の花</span></div>
-      <div class="gstage">${done? "咲きました"
-        : tg? `今日のぶん、育ちました（+${tg}）・咲くまであと${left}`
-            : `${STAGES[g.stage]}・今日まだ記録していません`}</div>
-      <div class="gmeter"><i style="width:${Math.round(g.ratio*100)}%"></i></div>
+      <div class="gstage">${done? "開花しました"
+        : `${STAGES[g.stage]}　—　次の「${g.next}」まで <b style="font-variant-numeric:tabular-nums">${g.nextPct}%</b>`}</div>
+      <div class="gmeter"><i style="width:${done?100:g.nextPct}%"></i></div>
       <div class="gstage" style="color:var(--ink-faint);font-size:10.5px;margin-top:3px">
-        育つのは1日に1回まで（ぴったりの日は2）</div>
+        ${done? "次の種をまきました" : "記録するたびに育ちます（誤差10%以内の記録は2倍）"}</div>
     </div></div>`;
 }
 
@@ -897,7 +988,7 @@ function gauge(est,act){
     ${act!=null?`<div class="gbar${over?" over":""}" style="margin-top:6px">
       <i class="act" style="width:${pct(act)}%" data-w="${pct(act)}%"></i></div>
     <div class="glab"><span>実際</span><span class="gnum">${mins(act)}　
-      ${act===est?"ぴったり":(over?"+":"−")+mins(Math.abs(act-est))}</span></div>`:""}
+      ${act===est?"的中":(over?"+":"−")+mins(Math.abs(act-est))}</span></div>`:""}
   </div>`;
 }
 
@@ -907,8 +998,8 @@ function gauge(est,act){
 function viewSetup(){
   V.innerHTML=`
   <div class="vhead"><p class="eyebrow">はじめに</p><h1 class="t">使う人と、使える時間</h1>
-  <p class="sub">名前はこの端末の中だけで使います。</p></div>
-  <div class="field"><label>名前</label><input id="nm" type="text" placeholder="ゆうた" autocomplete="off"></div>
+  <p class="sub">中学生・高校生向けのアプリです。名前はこの端末の中だけで使います。</p></div>
+  <div class="field"><label>名前</label><input id="nm" type="text" placeholder="ニックネームでも可" autocomplete="off"></div>
   <div class="field"><label>学年</label>
     <div class="chips" id="gr">${["中1","中2","中3","高1","高2","高3"].map((g,i)=>
       `<button class="chip${i===1?" on":""}" data-g="${g}">${g}</button>`).join("")}</div></div>
@@ -1017,7 +1108,7 @@ function viewDone(){
     <input id="am" type="number" inputmode="numeric" placeholder="${t.estMin}"></div>
   <div class="chips" id="q">${[10,15,20,30,45,60,90].map(n=>
     `<button class="chip" data-m="${n}">${n}分</button>`).join("")}</div>
-  <button class="btn" id="ok">やった</button>
+  <button class="btn" id="ok">この時間で記録する</button>
   <p class="sec">できなかったとき</p>
   <div class="chips" id="ms">${Object.entries(MISS).map(([k,v])=>
     `<button class="chip" data-ms="${k}">${v}</button>`).join("")}</div>
@@ -1080,23 +1171,20 @@ function viewResult(){
   ${st.n>0?`<div class="streak" style="margin-top:14px"><span class="fire">🔥</span><div>
     <b>${st.n}日つづいています</b><span>${st.n===1?"ここから続いていきます":"記録した日が続いています"}</span>
     </div></div>`:""}
-  ${gained.length? `<p class="sec">称号をもらいました</p>${gained.map(b=>
+  ${gained.length? `<p class="sec">称号を獲得しました</p>${gained.map(b=>
     `<div class="badge newbadge"><div class="h">${b.mark} ${esc(b.label)}</div>
      <div class="d">${esc(b.detail)}</div></div>`).join("")}`:""}
-  ${(ctx.bloomed||[]).length? `<p class="sec">花が咲きました</p>${(ctx.bloomed).map(id=>
+  ${(ctx.bloomed||[]).length? `<p class="sec">開花</p>${(ctx.bloomed).map(id=>
     `<div class="badge newbadge" style="text-align:center">${plantSVG(id,4,84)}
-     <div class="h">${esc(PLANTS[id]?PLANTS[id].n:"")}が 咲きました</div>
-     <div class="d">つぎのタネが飛んできました。</div></div>`).join("")}`
-   : `<p class="sec">花だん</p>
+     <div class="h">${esc(PLANTS[id]?PLANTS[id].n:"")}が開花しました</div>
+     <div class="d">次の種をまきました。育てられるのは、いつでも一株だけです。</div></div>`).join("")}`
+   : `<p class="sec">花壇</p>
       <div class="advice flat"><div class="h">${
-        ctx.grew===2? "ぴったりだったので、2つぶん育ちました"
-      : ctx.grew===1? "1つぶん育ちました"
-      : "今日のぶんは、もう育っています"}</div>
-      <div class="d">${ctx.grew>0
-        ? "花は1日に1回育ちます。ぴったりの日は2つぶんです。"
-        : "花が育つのは1日に1回までです。今日はもう育ったので、この記録では変わりません。つづきは明日。"}</div></div>
+        ctx.grew>=2? `誤差${Math.round(HIT*100)}%以内だったので、2つぶん育ちました`
+                   : "この記録で、1つぶん育ちました"}</div>
+      <div class="d">記録するたびに育ちます。1日に何件こなしても、こなしたぶんだけ進みます。</div></div>
       ${gardenCard()}`}
-  <button class="btn" id="next">つづける</button>`;
+  <button class="btn" id="next">続ける</button>`;
   // 幅を後から入れて、伸びるところを見せる
   requestAnimationFrame(()=>{
     V.querySelectorAll(".reveal .gbar i").forEach(i=>{ i.style.width=i.dataset.w; });
@@ -1453,24 +1541,24 @@ function viewReview(){
   <div class="card">
     <div class="stat"><span>記録ストリーク</span><b>${st.n}日</b></div>
     <div class="stat"><span>やったことの記録</span><b>${dn.length}件</b></div>
-    <div class="stat"><span>ぴったり（ずれ${Math.round(HIT*100)}%以内）</span><b>${bi.hits}回</b></div>
+    <div class="stat"><span>的中（誤差${Math.round(HIT*100)}%以内）</span><b>${bi.hits}回</b></div>
     ${os.enough?`<div class="stat"><span>実際にかかった時間</span><b>見積りの${Math.round(os.med*100)}%</b></div>`:""}
     <div class="stat"><span>できなかった記録</span><b>${S.tasks.filter(t=>t.missReason).length}件</b></div>
   </div>
   ${os.enough?"":`<div class="note">終わった記録が${MIN_SUBJ}件になると、ずれの真ん中の値を出せるようになります。今は${os.n}件。<br><b>少ない記録で線を引くと、実際より大きく見えてしまいます。</b></div>`}
 
-  <p class="sec">花だん</p>
+  <p class="sec">花壇</p>
   ${gardenCard()}
   ${(()=>{const g=gardenState(); const bl=(g&&g.bloomed)||[];
-    return bl.length? `<div class="hint">咲いた花：${bl.length}</div><div class="bloomrow">${
+    return bl.length? `<div class="hint">開花：${bl.length}回・種類 ${g.kinds} / ${PLANT_IDS.length}</div><div class="bloomrow">${
       bl.slice(-12).map(b=>`<div class="b">${plantSVG(b.id,4,42)}<span>${PLANTS[b.id]?PLANTS[b.id].n:""}</span></div>`).join("")
-    }</div>` : `<div class="hint">記録した日に育ちます。ぴったりだった日は、ふつうの2倍のはやさで育ちます。</div>`;})()}
+    }</div>` : `<div class="hint">記録するたびに育ちます。誤差${Math.round(HIT*100)}%以内だった記録は2倍のはやさで育ちます。全${PLANT_IDS.length}種。</div>`;})()}
 
   <p class="sec">称号</p>
   ${bi.list.length? bi.list.map(b=>`<div class="badge"><div class="h">${b.mark} ${esc(b.label)}</div>
     <div class="d">${esc(b.detail)}</div></div>`).join("")
     : `<div class="badge quiet"><div class="h">まだありません</div>
-       <div class="d">見積りとのずれが${Math.round(HIT*100)}%以内になると「ぴったり」、できなかった次の日にまた記録すると「立て直した」がもらえます。順位ではなく、あなた自身の記録にだけ出ます。</div></div>`}
+       <div class="d">見積りとの誤差が${Math.round(HIT*100)}%以内になると「的中」、できなかった次の日にまた記録すると「立て直した」が付きます。順位ではなく、あなた自身の記録にだけ出ます。</div></div>`}
 
   ${subj.length?`<p class="sec">教科ごとのずれ</p><div class="card">${subj.map(([s,v])=>
     `<div class="stat"><span>${s}<span style="color:var(--ink-faint)">・${v.n}件</span></span>
@@ -1780,7 +1868,7 @@ function viewPin(){
     if(now.length<PIN_LEN) return;
     if(st.stage==="check"){
       const got=await hashPin(now, S.settings.pin.salt);
-      if(got.h!==S.settings.pin.h){ st.a=""; paint(); return toast("ちがいます"); }
+      if(got.h!==S.settings.pin.h){ st.a=""; paint(); return toast("一致しません"); }
       if(st.mode==="off"){
         delete S.settings.pin; S.settings.pinFails=0; S.settings.pinUntil=0;
         await saveNow(); toast("パスコードをやめました"); return go("set");
@@ -1820,7 +1908,7 @@ function viewLock(){
         [1,2,3,4,5,6,7,8,9].map(n=>`<button data-n="${n}" ${w?"disabled":""}>${n}</button>`).join("")
         }<button class="fn" id="del" ${w?"disabled":""}>けす</button>
          <button data-n="0" ${w?"disabled":""}>0</button>
-         <button class="fn" id="help">わすれた</button></div>
+         <button class="fn" id="help">忘れたとき</button></div>
     </div>`;
     V.querySelectorAll("[data-n]").forEach(b=>b.onclick=()=>tap(b.dataset.n));
     V.querySelector("#del").onclick=()=>{ st.pin=st.pin.slice(0,-1); st.bad=false; paint(); };
@@ -1845,7 +1933,7 @@ function viewLock(){
     if(pen) S.settings.pinUntil=Date.now()+pen;
     await saveNow();
     st.pin=""; st.bad=true; paint();
-    toast(pen? "まちがいが続いたので、少し待ってください" : "ちがいます");
+    toast(pen? "誤りが続いたので、少し待ってください" : "一致しません");
     if(pen){ const t=setInterval(()=>{ if(!lockLeft()){ clearInterval(t); } paint(); },1000); }
   };
   const forgot=async()=>{
@@ -1869,7 +1957,7 @@ function viewSheet(){
   <button class="btn ghost" id="op">PDFを開く</button>
   <div class="note">「保存する」でPDFファイルができます。うまく保存できないときは
   「開く」を押すと、その場でPDFが出るので、そこから共有や保存ができます。</div>
-  <div class="pdfprev" id="prev"><div class="empty">つくっています…</div></div>
+  <div class="pdfprev" id="prev"><div class="empty">作成中です…</div></div>
   <button class="btn quiet" id="back">設定に戻る</button>`;
   $("#back").onclick=()=>go("set");
   const build=()=>{
