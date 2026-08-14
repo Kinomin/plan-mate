@@ -199,6 +199,8 @@ nav#tabs.hide{display:none;}
 .cal-cell.past{color:var(--ink-faint);opacity:.38;}
 .cal-cell.today{border-color:var(--rule);font-weight:700;}
 .cal-cell.sel{background:var(--ink);color:var(--paper);}
+.cal-cell.span{background:#EFEDE4;}
+.cal-cell.edge{background:#DDD8C8;font-weight:700;}
 .cal-cell .dot{width:5px;height:5px;border-radius:50%;background:var(--indigo);}
 .cal-cell .dot.full{background:var(--red);}
 .cal-cell.sel .dot{background:var(--paper);}
@@ -1163,7 +1165,8 @@ function draw(){
     goals:"goals",goaladd:"goals",goal:"goals",goalclose:"goals",
     taskadd:"goals",taskest:"goals",pickdate:"goals",
     review:"review",set:"set",sheet:"set",pin:"set"};
-  const g=GROUP[route]||"today";
+  /* 日付を選ぶ画面は、呼ばれ方でどのタブにいるかが変わる */
+  const g=(route==="pickdate" && ctx.mode==="sheet")? "set" : (GROUP[route]||"today");
   TABS.innerHTML=[["today","今日"],["goals","目標"],["review","ふりかえり"],["set","設定"]]
     .map(([k,l])=>`<button data-tab="${k}" class="${g===k?"on":""}">${l}</button>`).join("");
   ({today:viewToday,done:viewDone,result:viewResult,applymove:viewApplyMove,
@@ -1660,37 +1663,53 @@ async function commitTask(g,d,adv){
 function viewPickDate(){
   const mode=ctx.mode, d=ctx.draft;
   if(!d) return go("goals");
-  const field = mode==="goal" ? "deadline" : "date";
-  const heading = mode==="goal"? "期限を選ぶ" : (mode==="move"? "いつに動かす？" : "いつやる？");
+  /* どの欄に入れるかは、呼ぶ側が決められる（記録シートの期間は from/to の2つ） */
+  const field = ctx.field || (mode==="goal" ? "deadline" : "date");
+  /* 過ぎた日を選べるのは、記録シートの期間だけ。予定は先の日にしか置けない。 */
+  const allowPast = mode==="sheet";
+  const heading = mode==="goal"? "期限を選ぶ"
+    : mode==="move"? "いつに動かす？"
+    : mode==="sheet"? (field==="from"? "はじめの日を選ぶ" : "おわりの日を選ぶ")
+    : "いつやる？";
   const ym = ctx.month || ymOf(d[field] || today());
   const {daysInMonth,startWD}=monthBounds(ym);
   const markers={};
   if(mode==="goal"){
     S.goals.forEach(x=>{ if(x.deadline) markers[x.deadline]=(markers[x.deadline]||0)+1; });
+  }else if(mode==="sheet"){
+    S.tasks.forEach(t=>{ if(t.recordedAt) markers[t.recordedAt]=(markers[t.recordedAt]||0)+1; });
   }else{
     S.tasks.filter(t=>t.planDate && isOpen(t)).forEach(t=>{ markers[t.planDate]=(markers[t.planDate]||0)+1; });
   }
   const td=today();
+  /* 期間を選んでいるあいだ、もう片方の端も薄く見せる */
+  const other = mode==="sheet"? d[field==="from"? "to":"from"] : null;
   let cells="";
   for(let i=0;i<startWD;i++) cells+=`<div class="cal-cell blank"></div>`;
   for(let day=1; day<=daysInMonth; day++){
     const ds=`${ym}-${pad(day)}`;
     const past = ds<td;
     const sel = ds===d[field];
+    /* いま選んでいない側の端と、そのあいだの日を薄く示す */
+    const spanned = mode==="sheet" && d.from && d.to && ds>=d.from && ds<=d.to;
     const isToday = ds===td;
     const n=markers[ds]||0;
     const full = mode==="task" && !past && n>0 && (plannedOn(ds)+(d.est||0))>dayCapacity(ds);
-    cells+=`<button class="cal-cell${past?" past":""}${sel?" sel":""}${isToday?" today":""}"
-      data-d="${ds}" ${past?"disabled":""}><span class="num">${day}</span>${
+    const off = (past && !allowPast) || (mode==="sheet" && ds>td);
+    cells+=`<button class="cal-cell${past&&!allowPast?" past":""}${sel?" sel":""}${isToday?" today":""}${
+      (spanned&&!sel)?" span":""}${other===ds?" edge":""}"
+      data-d="${ds}" ${off?"disabled":""}><span class="num">${day}</span>${
       n?`<span class="dot${full?" full":""}"></span>`:""}</button>`;
   }
   V.innerHTML=`
   <div class="vhead"><p class="eyebrow">${heading}</p>
-  <h1 class="t">${monthLabel(ym)}</h1></div>
+  <h1 class="t">${monthLabel(ym)}</h1>
+  ${mode==="sheet"?`<p class="sub">${fmt(d.from,true)} 〜 ${fmt(d.to,true)}</p>`:""}</div>
   <div class="calnav"><button class="chip" id="prev">‹ 前の月</button><button class="chip" id="next">次の月 ›</button></div>
   <div class="calgrid">${WD.map(w=>`<div class="cal-wd">${w}</div>`).join("")}${cells}</div>
   <div class="hint">${mode==="goal"?
     "点は、すでにある目標の期限です。":
+    mode==="sheet"? "点は、記録がある日です。今日より先は選べません。":
     "点は、すでに予定が入っている日です。赤い点は、その日がいっぱいということです。"}</div>
   <button class="btn quiet" id="back">選ばずに戻る</button>`;
   $("#prev").onclick=()=>go("pickdate",Object.assign({},ctx,{month:shiftYm(ym,-1)}));
@@ -1698,6 +1717,10 @@ function viewPickDate(){
   V.querySelectorAll(".cal-cell[data-d]").forEach(b=>{
     b.onclick=()=>{
       const nd=Object.assign({},d,{[field]:b.dataset.d});
+      /* 前後がひっくり返ったら、そろえておく */
+      if(mode==="sheet"){
+        if(nd.from>nd.to){ if(field==="from") nd.to=nd.from; else nd.from=nd.to; }
+      }
       go(ctx.returnRoute, Object.assign({},ctx,{draft:nd, month:undefined}));
     };
   });
@@ -1854,7 +1877,35 @@ function chart(list){
 }
 
 /* ---------- 設定 ---------- */
+/* ============================================================
+   控え（バックアップ）
+
+   記録はこの端末の中だけにある。端末を替えたとき、しばらく開かずに
+   端末の掃除で消されたとき、それを取り戻す方法がほかにない。
+   そこで、記録をそのままファイルに書き出して外に置けるようにする。
+   読み込みは、いま入っている記録とそっくり入れ替える。
+   （混ぜると、どちらが本当か分からなくなるため。）
+   ============================================================ */
+const BACKUP_TAG="plan-mate-backup";
+function backupBlob(){
+  const body={ app:BACKUP_TAG, v:SCHEMA, at:today(), state:S };
+  return new Blob([JSON.stringify(body)], {type:"application/json"});
+}
+/* 読み込んだものが、確かにこのアプリの控えかを見てから受け取る。 */
+function parseBackup(text){
+  let raw;
+  try{ raw=JSON.parse(text); }catch(e){ return {error:"このファイルは読めませんでした。"}; }
+  const st = (raw && raw.app===BACKUP_TAG && raw.state)? raw.state : raw;
+  if(!st || typeof st!=="object" || !Array.isArray(st.tasks) || !Array.isArray(st.goals))
+    return {error:"プランメイトの控えではないようです。"};
+  const r=migrate(st);
+  if(r.error) return {error: r.error==="newer"
+    ? "この控えは、いまより新しい版で作られています。新しい版で読み込んでください。"
+    : "控えの中身を読み取れませんでした。"};
+  return {state:r.state};
+}
 function viewSet(){
+  const counts=`やること ${S.tasks.length}件・目標 ${S.goals.length}件`;
   V.innerHTML=`
   <div class="vhead"><h1 class="t">設定</h1><p class="sub">${esc(S.student.name)}・${esc(S.student.grade)}</p></div>
   <p class="sec">1日に勉強に使える時間</p>
@@ -1864,9 +1915,20 @@ function viewSet(){
   <p class="sec">パスコード</p>
   <button class="btn ghost" id="pin">${hasPin()? "パスコードを変える／やめる" : "パスコードをつける"}</button>
   <div class="hint">${hasPin()? "開くときに4けたの数字を聞きます。" : "開くときに4けたの数字を聞くようにできます。"}</div>
-  <p class="sec">記録</p>
-  <button class="btn ghost" id="pdf">記録をPDFにする</button>
+  <p class="sec">記録シート</p>
+  <button class="btn ghost" id="pdf">期間を決めてPDFにする</button>
   <div class="hint">画面で中身を確かめてから、PDFにできます。</div>
+  <p class="sec">記録を長く残す</p>
+  <button class="btn ghost" id="bk">控えを書き出す</button>
+  <div class="hint">いまの記録（${counts}）を1つのファイルに書き出します。
+  ${S.settings.backupAt? `前回の書き出し：${fmt(S.settings.backupAt,true)}` : "まだ書き出していません。"}</div>
+  <button class="btn ghost" id="rest">控えから戻す</button>
+  <input type="file" id="file" accept="application/json,.json" class="hidden">
+  <div class="note"><b>記録はこの端末の中にしかありません。</b>
+  端末を替えたときや、しばらく開かずに端末の掃除で消えたときは、控えがないと戻せません。
+  月に一度、書き出してクラウドやパソコンに置いておくことをすすめます。<br>
+  控えの中身は、このアプリが書き出したそのままです。外には送られません。</div>
+  <p class="sec">はじめから</p>
   <button class="btn quiet" id="rs">すべての記録を消す</button>
   <div class="note">保存先：${Store.persistent()?"この端末（IndexedDB）":"<b>一時的な保存のみ</b>。閉じると消えます。"}<br>
   ${Store.persistent()?"ホーム画面に追加しておくと、消えにくくなります。長く開かないと、端末の掃除で消えることがあります。<br>":""}
@@ -1880,8 +1942,45 @@ function viewSet(){
   };
   $("#pdf").onclick=()=>go("sheet");
   $("#pin").onclick=()=>go("pin");
+  $("#bk").onclick=async()=>{
+    let url;
+    try{ url=URL.createObjectURL(backupBlob()); }
+    catch(e){ console.error(e); return toast("控えを作れませんでした"); }
+    const a=document.createElement("a");
+    a.href=url; a.download=`プランメイトの控え-${today()}.json`;
+    a.target="_blank"; a.rel="noopener";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    S.settings.backupAt=today();
+    await saveNow();
+    toast("控えを書き出しました");
+  };
+  $("#rest").onclick=()=>$("#file").click();
+  $("#file").onchange=async e=>{
+    const f=e.target.files && e.target.files[0];
+    e.target.value="";                       // 同じファイルをもう一度選べるように
+    if(!f) return;
+    let text;
+    try{ text=await f.text(); }
+    catch(err){ console.error(err); return toast("ファイルを開けませんでした"); }
+    const r=parseBackup(text);
+    if(r.error) return toast(r.error);
+    const st=r.state;
+    const ok=await ask("この控えに入れ替えますか",{
+      body:`控えの中身：やること ${st.tasks.length}件・目標 ${st.goals.length}件`
+        +`（${(st.student&&st.student.name)||"名前なし"}）。`
+        +`いまの記録（${counts}）は消えて、控えの中身に入れ替わります。`,
+      okLabel:"入れ替える", danger:true});
+    if(!ok) return;
+    S=st;
+    unlocked=true;                           // 控えのパスコードで締め出さない
+    advanceGarden();
+    await saveNow();
+    toast("控えから戻しました");
+    go("today");
+  };
   $("#rs").onclick=async()=>{
-    if(await ask("すべての記録を消しますか",{body:"元に戻せません。",danger:true,okLabel:"消す"})){
+    if(await ask("すべての記録を消しますか",{body:"元に戻せません。先に控えを書き出しておくと、あとから戻せます。",danger:true,okLabel:"消す"})){
       S=blank(); advanceGarden(); await saveNow(); go("today");
     }
   };
@@ -1914,22 +2013,39 @@ function wrapText(ctx,text,w){
   return out;
 }
 /* シートの中身を、描画しやすい形の並びにする */
-function sheetBlocks(){
-  const dn=doneTasks(), os=overallStats(), st=streakInfo();
-  const misses=S.tasks.filter(t=>t.missReason);
+/* 記録シートは期間で切り出す。期間の外の記録は、数にも表にも入れない。
+   ここで出す数字は、すべてその期間の中だけで数え直したもの。 */
+const inRange=(ds,r)=>!!ds && ds>=r.from && ds<=r.to;
+function sheetData(r){
+  const rec=S.tasks.filter(t=>(t.done||t.missReason) && inRange(t.recordedAt,r));
+  const done=rec.filter(t=>t.done && t.actMin>0 && t.estMin>0);
+  const days=new Set(rec.map(t=>t.recordedAt));
+  const ratios=done.map(t=>t.actMin/t.estMin).sort((a,b)=>a-b);
+  /* 期間に関わる目標だけ。その期間に記録があったもの、
+     期限が入っているもの、その期間にふりかえったもの。 */
+  const goals=S.goals.filter(g=>
+    rec.some(t=>t.goalId===g.id) || inRange(g.deadline,r) ||
+    (isClosed(g) && inRange(g.result.at,r)));
+  return {rec, done, days, goals,
+    med: ratios.length>=MIN_SUBJ? median(ratios) : null,
+    misses: rec.filter(t=>t.missReason).length};
+}
+function sheetBlocks(r){
+  const d=sheetData(r);
   const B=[];
   B.push({t:"h1", text:`${S.student.name}の学習記録`});
-  B.push({t:"meta", text:`${fmt(today(),true)} 作成　／　${S.student.grade||""}`});
+  B.push({t:"meta", text:`${fmt(r.from,true)} 〜 ${fmt(r.to,true)}`
+    +`　／　${S.student.grade||""}　／　${fmt(today(),true)} 作成`});
   B.push({t:"sec", text:"まとめ"});
   B.push({t:"table", cols:[.32,.16,.32,.20], head:null, rows:[
-    ["記録が続いている日数", `${st.n}日`, "やったことの記録", `${dn.length}件`],
-    ["できなかった記録", `${misses.length}件`, "見積りに対する実際",
-      os.enough? `${Math.round(os.med*100)}%` : "記録が少ないため出しません"]
+    ["記録した日数", `${d.days.size}日`, "やったことの記録", `${d.done.length}件`],
+    ["できなかった記録", `${d.misses}件`, "見積りに対する実際",
+      d.med!=null? `${Math.round(d.med*100)}%` : "記録が少ないため出しません"]
   ], keyCols:[0,2]});
   B.push({t:"sec", text:"目標"});
   B.push({t:"table", cols:[.21,.07,.15,.11,.17,.09,.20],
     head:["目標","教科","期限","やること","備考","結果","読み方"],
-    rows: S.goals.length? S.goals.map(g=>{
+    rows: d.goals.length? d.goals.map(g=>{
       const all=S.tasks.filter(t=>t.goalId===g.id);
       const rd=goalReading(g);
       return [g.title, g.subject, g.deadline||"—",
@@ -1937,9 +2053,9 @@ function sheetBlocks(){
         isClosed(g)&&g.result.note? g.result.note : "—",
         isClosed(g)? (g.result.achieved?"達成":"届かず") : "進行中",
         rd? rd.h : ""];
-    }) : [["まだ目標がありません","","","","","",""]]});
+    }) : [["この期間に関わる目標はありません","","","","","",""]]});
   B.push({t:"sec", text:"見積りと実際"});
-  const rows=S.tasks.slice().filter(t=>t.done||t.missReason)
+  const rows=d.rec.slice()
     .sort((a,b)=>(a.recordedAt||"").localeCompare(b.recordedAt||""))
     .map(t=>{
       const g=goalOf(t);
@@ -1951,13 +2067,13 @@ function sheetBlocks(){
     });
   B.push({t:"table", cols:[.15,.07,.27,.09,.09,.10,.23],
     head:["日付","教科","やること","見積り","実際","ずれ","できなかった理由"],
-    rows: rows.length? rows : [["まだ記録がありません","","","","","",""]],
+    rows: rows.length? rows : [["この期間に記録はありません","","","","","",""]],
     redCol:5});
-  B.push({t:"foot", text:"このアプリは点数や順位をつけません。上の数字は、すべて本人が書いた見積りと、実際にかかった時間から計算したものです。"});
+  B.push({t:"foot", text:"このアプリは点数や順位をつけません。上の数字は、すべて本人が書いた見積りと、実際にかかった時間から、この期間について計算したものです。"});
   return B;
 }
-function sheetPages(){
-  const blocks=sheetBlocks();
+function sheetPages(r){
+  const blocks=sheetBlocks(r);
   const CW=PDF_W-PG.m*2;
   const pages=[]; let cv=null, ctx=null, y=0;
   const newPage=()=>{
@@ -2060,8 +2176,8 @@ function pdfFromCanvases(cvs){
   w(x);
   return new Blob(chunks,{type:"application/pdf"});
 }
-function makePdf(){
-  const pages=sheetPages();
+function makePdf(r){
+  const pages=sheetPages(r);
   return {blob:pdfFromCanvases(pages), pages:pages.length};
 }
 /* ---------- パスコードの設定 ---------- */
@@ -2197,21 +2313,57 @@ function viewLock(){
 }
 
 /* ---------- 記録シート：作られるPDFをそのまま見せる ---------- */
+/* 期間の決め方。はじめて開いたときは「今月」。
+   月ごとに出して提出する使い方をいちばん想定している。 */
+function monthRange(n){
+  const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()+n);
+  const y=d.getFullYear(), m=d.getMonth();
+  const last=new Date(y,m+1,0);
+  const to=iso(last)>today()? today() : iso(last);
+  return {from:iso(new Date(y,m,1)), to};
+}
+function allRange(){
+  const ds=S.tasks.map(t=>t.recordedAt).filter(Boolean).sort();
+  return {from: ds.length? ds[0] : today(), to: today()};
+}
 function viewSheet(){
+  const r=Object.assign(monthRange(0), ctx.draft||{});
+  if(r.from>r.to) r.from=r.to;
   sheetCache=null;
+  const keep=x=>Object.assign({}, ctx, x);
+  const d=sheetData(r);
   V.innerHTML=`
   <div class="vhead"><p class="eyebrow">記録シート</p><h1 class="t">PDFにする</h1>
-  <p class="sub">下に出るものが、そのままPDFになります。</p></div>
-  <button class="btn" id="pdf">PDFを作る</button>
+  <p class="sub">期間を決めると、その間の記録だけをPDFにします。</p></div>
+  <p class="sec">期間</p>
+  <div class="field"><label>はじめの日</label>
+    <button type="button" id="from" style="text-align:left;width:100%;padding:4px 0;font-size:16px">${fmt(r.from,true)}</button></div>
+  <div class="field"><label>おわりの日</label>
+    <button type="button" id="to" style="text-align:left;width:100%;padding:4px 0;font-size:16px">${fmt(r.to,true)}</button></div>
+  <div class="chips" id="qr">
+    <button class="chip" data-r="0">今月</button>
+    <button class="chip" data-r="-1">先月</button>
+    <button class="chip" data-r="-3">この3か月</button>
+    <button class="chip" data-r="all">すべて</button></div>
+  <div class="hint">この期間の記録：${d.rec.length}件（${d.days.size}日）</div>
+  <button class="btn" id="pdf"${d.rec.length?"":" disabled"}>PDFを作る</button>
   <div class="note">押すと、下に出ているものがそのままPDFになります。
   端末によって、ファイルとして保存されるか、その場でPDFが開くかが変わります。
   <b>開いたときは、そこから保存や共有ができます。</b></div>
   <div class="pdfprev" id="prev"><div class="empty">作成中です…</div></div>
   <button class="btn quiet" id="back">設定に戻る</button>`;
   $("#back").onclick=()=>go("set");
+  $("#from").onclick=()=>go("pickdate",keep({mode:"sheet", field:"from", draft:r, returnRoute:"sheet"}));
+  $("#to").onclick  =()=>go("pickdate",keep({mode:"sheet", field:"to",   draft:r, returnRoute:"sheet"}));
+  $("#qr").onclick=e=>{
+    const b=e.target.closest("[data-r]"); if(!b) return;
+    const v=b.dataset.r;
+    go("sheet",{draft: v==="all"? allRange()
+      : (v==="-3"? {from:monthRange(-2).from, to:monthRange(0).to} : monthRange(Number(v)))});
+  };
   const build=()=>{
     if(sheetCache) return sheetCache;
-    try{ sheetCache=sheetPages(); }
+    try{ sheetCache=sheetPages(r); }
     catch(e){ console.error(e); toast("シートを作れませんでした"); sheetCache=null; }
     return sheetCache;
   };
@@ -2236,7 +2388,7 @@ function viewSheet(){
   $("#pdf").onclick=()=>withPdf((blob,n)=>{
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
-    a.href=url; a.download=`学習記録-${today()}.pdf`;
+    a.href=url; a.download=`学習記録-${r.from}〜${r.to}.pdf`;
     /* download を分かる端末はファイルとして保存し、分からない端末は
        target のおかげでその場で開く。押す手順はどちらも同じ1回。 */
     a.target="_blank"; a.rel="noopener";
