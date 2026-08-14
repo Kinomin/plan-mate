@@ -311,7 +311,9 @@ const Store = (() => {
   /* 読めなかったのか、空だったのかを、呼ぶ側が区別できるようにする。
      読めなかったときに書き込むと、中身を消してしまう。 */
   function seal(){ gaveUp=true; }
-  return {open,get,set,seal,persistent:()=>ok, lost:()=>gaveUp};
+  /* 「消してやり直す」を選んだときだけ、書き込みの封を解く。 */
+  function unseal(){ gaveUp=false; }
+  return {open,get,set,seal,unseal,persistent:()=>ok, lost:()=>gaveUp};
 })();
 
 /* ============================================================
@@ -433,6 +435,11 @@ const MIGRATIONS={
 function migrate(raw){
   let st;
   try{ st=JSON.parse(JSON.stringify(raw)); }catch(e){ return {error:"broken"}; }
+  if(!st || typeof st!=="object") return {error:"broken"};
+  /* 形が違うものを通すと、画面を出すたびに落ちるようになり、
+     開き直しても直らない行き止まりになる。ここで止める。 */
+  if(st.tasks!==undefined && !Array.isArray(st.tasks)) return {error:"broken"};
+  if(st.goals!==undefined && !Array.isArray(st.goals)) return {error:"broken"};
   if(typeof st.v!=="number") st.v=1;
   if(st.v>SCHEMA) return {error:"newer", found:st.v};
   while(st.v<SCHEMA){
@@ -446,7 +453,15 @@ function migrate(raw){
   out.v=SCHEMA;
   return {state:out};
 }
-async function saveNow(){ await Store.set(S); }
+/* 保存できたかどうかを返す。書けなかったのに「できた」と伝えないよう、
+   保存先はあるのに書けなかったとき（空き容量が無いなど）はその場で伝える。
+   保存先そのものが無い開き方（アプリ内ブラウザなど）は、
+   画面の上に出しっぱなしの断り書きで伝えるので、ここでは出さない。 */
+async function saveNow(){
+  const ok=await Store.set(S);
+  if(!ok && Store.persistent()) toast("保存できませんでした。端末の空きを確かめてください");
+  return ok;
+}
 
 /* ============================================================
    3. 日付
@@ -1067,7 +1082,7 @@ function advise(d){ // {subject, estMin, planDate, goalId, taskId}
   if(use){
     const pct=Math.round((use.med-1)*100);
     if(Math.abs(pct)>=15){
-      const pred=Math.round(d.estMin*use.med/5)*5;
+      const pred=Math.max(5, Math.round(d.estMin*use.med/5)*5);   // 0分をすすめない
       out.push({k:"ratio", warn:pct>0, suggest:pred,
         h:`${use.label}は、見積りより${pct>0?"長く":"短く"}かかることが多いです`,
         d:`これまで${use.n}回の記録で、実際にかかった時間は見積りの${Math.round(use.med*100)}%（真ん中の値）。${d.estMin}分なら、${pred}分くらいになるかもしれません。`});
@@ -1083,7 +1098,7 @@ function advise(d){ // {subject, estMin, planDate, goalId, taskId}
     if(any.length){
       const r=any[0], ratio=r.actMin/r.estMin;
       const same = near.length>0;
-      const pred=Math.round(d.estMin*ratio/5)*5;
+      const pred=Math.max(5, Math.round(d.estMin*ratio/5)*5);
       out.push({k:"last", warn:ratio>1.15, suggest:ratio>1.15?pred:null,
         h:`${same?d.subject:"前"}にやった「${r.title}」は、${mins(r.estMin)}の見積りで ${mins(r.actMin)}かかりました`,
         d:`まだ記録は${any.length}件なので、これがいつもそうだとは限りません。${
@@ -1220,8 +1235,18 @@ function render(){
     V.innerHTML=`<div class="vhead"><h1 class="t">画面を出せませんでした</h1>
       <p class="sub">記録は消えていません。</p></div>
       <div class="note">${esc((err&&err.message)||String(err))}</div>
-      <button class="btn ghost" id="rl">開き直す</button>`;
+      <button class="btn ghost" id="rl">開き直す</button>
+      <button class="btn ghost" id="bk2">バックアップを書き出す</button>
+      <div class="hint">開き直しても同じ画面になるときは、先に書き出してから下を押してください。</div>
+      <button class="btn quiet" id="rs2">すべて消してはじめからやり直す</button>`;
     const b=V.querySelector("#rl"); if(b) b.onclick=()=>location.reload();
+    const b2=V.querySelector("#bk2"); if(b2) b2.onclick=()=>downloadBackup();
+    const b3=V.querySelector("#rs2");
+    if(b3) b3.onclick=async()=>{
+      if(await ask("すべての記録を消しますか",{body:"元に戻せません。",danger:true,okLabel:"消す"})){
+        S=blank(); advanceGarden(); await saveNow(); go("today");
+      }
+    };
   }
 }
 /* 画面を切り替えるたびに、前の画面が置いていったものを片づける。
@@ -1272,6 +1297,16 @@ TABS.addEventListener("click",e=>{
 /* iOS は、touch の受け口がどこにも無いと :active を出さない。
    何もしない受け口をひとつ置いて、押した見た目を有効にする。 */
 document.addEventListener("touchstart",()=>{},{passive:true});
+
+/* 保存先が使えない開き方のときだけ出す断り書き。
+   このまま使うと、閉じた時点で記録が消える。設定の隅ではなく、
+   毎日ひらく画面の頭に出す。 */
+function storageWarning(){
+  if(Store.persistent()) return "";
+  return `<div class="advice warn"><div class="h">この開き方では、記録が残りません</div>
+    <div class="d">閉じると消えます。ふつうのブラウザ（Safari や Chrome）で開き直すと、
+    この端末に残るようになります。アプリ内のブラウザや、プライベートな窓では残りません。</div></div>`;
+}
 
 /* 見積りと実績を並べて見せる。このアプリの中心。 */
 /* anim を立てると、幅を入れずに出す。あとから幅を入れて、伸びるところを見せる。
@@ -1339,6 +1374,7 @@ function viewToday(){
   const cap=dayCapacity(td);
   const st=streakInfo();
   V.innerHTML=`
+  ${storageWarning()}
   <div class="vhead"><p class="eyebrow">${fmt(td,true)}</p><h1 class="t">今日</h1>
   <p class="sub">${list.length? `残り${list.filter(isOpen).length}件・${mins(total)}／使える時間 ${mins(cap)}`
     : "予定はありません"}</p></div>
@@ -1467,9 +1503,10 @@ function viewApplyMove(){
     advanceGarden(-back);
   }
   if(nd!==t.planDate) t.planDate=nd;
-  saveNow().catch(e=>console.error(e));
-  toast(`${fmt(nd)}に動かしました`);
   go("today");
+  /* 先に画面を戻してから保存する。書けたと分かってから伝える。 */
+  saveNow().then(ok=>{ if(ok!==false) toast(`${fmt(nd)}に動かしました`); })
+           .catch(e=>console.error(e));
 }
 
 function viewResult(){
@@ -1768,6 +1805,7 @@ function viewTaskAdd(){
 }
 
 async function commitTask(g,d,adv){
+  if(!(d.est>0)) return toast("何分かかると思うか、入れてください");   // 0分では記録が意味を持たない
   S.tasks.push({
     id:uid(), goalId:g.id, title:d.title, planDate:d.date,
     estMin:d.est, estFirst:d.first, estEdits:d.edits||0, estEdited:(d.edits||0)>0,
@@ -2034,7 +2072,10 @@ function backupDiff(st){
 function applyBackup(st, d){
   if(d.fresh){
     S=st;
-    unlocked=true;                           // バックアップのパスコードで締め出さない
+    /* パスコードは持ち込まない。他の端末で付けた番号が入ると、
+       次に開いたとき、覚えのない番号を聞かれて締め出されてしまう。 */
+    if(S.settings){ delete S.settings.pin; S.settings.pinFails=0; S.settings.pinUntil=0; }
+    unlocked=true;
     rollGrade();
     advanceGarden();
     return;
@@ -2075,7 +2116,11 @@ function downloadSheetPdf(r, ready){
   a.target="_blank"; a.rel="noopener";
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),60000);
-  toast(`PDFを作りました（${pages.length}ページ）`);
+  const n=pages.length;
+  /* 1ページ8.7MBの下絵を抱えたままにしない。画面に出したぶんとは別に、
+     ここで作ったものは渡し終えた時点で手放す。 */
+  if(!ready) pages.forEach(c=>{ c.width=0; c.height=0; });
+  toast(`PDFを作りました（${n}ページ）`);
 }
 /* バックアップの書き出しは設定から。 */
 async function downloadBackup(){
@@ -2124,7 +2169,7 @@ function viewSet(){
   <p class="sec">はじめから</p>
   <button class="btn quiet" id="rs">すべての記録を消す</button>
   <div class="note">保存先：${Store.persistent()?"この端末":"<b>一時的な保存のみ</b>。閉じると消えます。"}<br>
-  ${Store.persistent()?"ホーム画面に追加しておくと、消えにくくなります。長く開かないと、端末の掃除で消えることがあります。<br>":""}
+  ${Store.persistent()?"ホーム画面に追加すると消えにくくなりますが、追加する前にバックアップを書き出してください。長く開かないと、端末の掃除で消えることがあります。<br>":""}
   版：${APP_VERSION}<br>
   このアプリは通信しません。記録が外に送られることはありません。AIも使いません。</div>`;
   /* 学年は押した時点で保存する。押して光っただけで保存されていないと、
@@ -2136,7 +2181,11 @@ function viewSet(){
     b.classList.add("on");
     /* 入れ直した学年は「いまの年度のもの」として数え直す */
     S.student.grade=b.dataset.g; S.student.gradeYear=schoolYear(today());
-    await saveNow(); toast(`学年を${b.dataset.g}にしました`); render();
+    await saveNow(); toast(`学年を${b.dataset.g}にしました`);
+    /* 描き直すと、打ちかけの「使える時間」が元に戻ってしまう。
+       見出しだけ書き換える。 */
+    const sub=V.querySelector("p.sub");
+    if(sub) sub.textContent=`${S.student.name}・${S.student.grade}`;
   };
   $("#sv").onclick=async()=>{
     const wd=parseInt($("#wd").value,10), we=parseInt($("#we").value,10);
@@ -2203,9 +2252,18 @@ function viewGraduated(){
   <p class="sec">記録の持ち出し</p>
   <button class="btn" id="pdf">これまでの記録をPDFにする</button>
   <div class="hint">はじめて記録した日から今日までを、1つのPDFにまとめます。</div>
+  <p class="sec">学年がちがう場合</p>
+  <div class="chips" id="gr">${GRADES.map(g=>
+    `<button class="chip" data-g="${g}">${g}</button>`).join("")}</div>
+  <div class="hint">入れまちがえていたときは、いまの学年を選ぶと戻れます。記録はそのままです。</div>
   <button class="btn quiet" id="rs">すべて消して、はじめからやり直す</button>
-  <div class="hint">学年をまちがえて入れていた場合は、ここからやり直せます。記録は消えます。</div>`;
+  <div class="hint">記録は消えます。先にPDFにしておくと、手元には残せます。</div>`;
   $("#pdf").onclick=()=>downloadSheetPdf(allRange());
+  $("#gr").onclick=async e=>{
+    const b=e.target.closest("[data-g]"); if(!b) return;
+    S.student.grade=b.dataset.g; S.student.gradeYear=schoolYear(today());
+    await saveNow(); toast(`学年を${b.dataset.g}にしました`); go("today");
+  };
   $("#rs").onclick=async()=>{
     if(await ask("すべての記録を消しますか",{
       body:"元に戻せません。先にPDFにしておくと、記録は手元に残せます。",
@@ -2294,8 +2352,11 @@ function sheetBlocks(r){
   B.push({t:"table", cols:[.34,.11,.19,.16,.20],
     head:["目標","教科","期限","やること","結果"],
     rows: d.goals.length? d.goals.map(g=>{
-      const all=S.tasks.filter(t=>t.goalId===g.id);
-      return [g.title, g.subject, g.deadline||"—",
+      /* この表もその期間のぶんだけを出す。ぜんぶの件数を出すと、
+         7月のシートに4月からの数が載って、期間の意味が消える。 */
+      const all=S.tasks.filter(t=>t.goalId===g.id &&
+        (inRange(t.recordedAt,r) || inRange(t.planDate,r)));
+      return [g.title, g.subject, g.deadline? fmt(g.deadline,true) : "—",
         `${all.filter(t=>t.done).length} / ${all.length}`,
         isClosed(g)? (g.result.achieved?"達成":"届かず") : "進行中"];
     }) : [["この期間に関わる目標はありません","","","",""]]});
@@ -2322,8 +2383,10 @@ function sheetPages(r){
     o=o||{};
     const ws=cols.map(f=>CW*f);
     const setFont=bold=>{ ctx.font=(bold?"600 ":"")+PG.body+" "+FONTS; };
+    /* 太字で描く枠は太字で測る。細字で測ると、描いたときに枠からはみ出す。 */
+    const boldAt=i=>!!(o.bold || (o.keyCols && o.keyCols.includes(i)));
+    const lines=cells.map((c,i)=>{ setFont(boldAt(i)); return wrapText(ctx,c,ws[i]-PG.pad*2); });
     setFont(o.bold);
-    const lines=cells.map((c,i)=>wrapText(ctx,c,ws[i]-PG.pad*2));
     const h=Math.max(...lines.map(l=>l.length))*PG.line+PG.pad*2;
     if(!room(h)){
       newPage();
@@ -2407,10 +2470,6 @@ function pdfFromCanvases(cvs){
   x+=`trailer\n<< /Size ${N+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   w(x);
   return new Blob(chunks,{type:"application/pdf"});
-}
-function makePdf(r){
-  const pages=sheetPages(r);
-  return {blob:pdfFromCanvases(pages), pages:pages.length};
 }
 /* ---------- パスコードの設定 ---------- */
 function viewPin(){
@@ -2630,9 +2689,18 @@ function bootFailed(title, body){
     `<div class="vhead"><h1 class="t">${esc(title)}</h1>
      <p class="sub">記録は消していません。</p></div>
      <div class="note">${esc(body)}</div>
-     <button class="btn" id="rl">開き直す</button>`;
+     <button class="btn" id="rl">開き直す</button>
+     <button class="btn quiet" id="rs3">消してはじめからやり直す</button>
+     <div class="hint">開き直しても直らないときだけ押してください。前の記録は戻せません。</div>`;
   const b=document.querySelector("#rl");
   if(b) b.onclick=()=>location.reload();
+  const b3=document.querySelector("#rs3");
+  if(b3) b3.onclick=async()=>{
+    if(await ask("すべての記録を消しますか",{body:"元に戻せません。",danger:true,okLabel:"消す"})){
+      Store.unseal();
+      S=blank(); advanceGarden(); unlocked=true; await saveNow(); go("today");
+    }
+  };
 }
 (async()=>{
   try{
