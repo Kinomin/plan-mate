@@ -272,8 +272,8 @@ const Store = (() => {
 /* ============================================================
    2. 状態
    ============================================================ */
-const APP_VERSION="2026.08.13-g";
-const SCHEMA=8;
+const APP_VERSION="2026.08.14-a";
+const SCHEMA=9;
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 const SUBJECTS=["国語","数学","英語","理科","社会","その他"];
@@ -294,6 +294,21 @@ function blank(){
     settings:{ weekdayMin:60, weekendMin:120 } };
 }
 const MIGRATIONS={
+  /* v8 → v9：育ちの持ち方を変えた。
+     「記録ぜんぶの合計から、株を植えた時点の合計(base)を引く」やり方は、
+     記録を取り消すと合計だけが減り、収穫のときに引き当てた base が
+     取り残される。その結果「何を記録しても育たない」時間ができていた。
+     株ごとの数取り器(grown)に持ち替え、足し引きが釣り合うようにする。
+     いま育てている株の進みぐあいは、そのまま引き継ぐ。 */
+  8(st){
+    const c=st.garden && st.garden.current;
+    if(c && typeof c.grown!=="number"){
+      const total=(st.tasks||[]).reduce((p,t)=>p+growthOf(t), 0);
+      c.grown=(typeof c.base==="number")? Math.max(0, total-c.base) : 0;
+      delete c.base;
+    }
+    return st;
+  },
   /* v7 → v8：花壇に、開花のあと（受粉・実・熟す）を足した。
      一株の一生が5段階から8段階になり、開花は終わりではなく途中になった。
      そのため bloomed（咲いた花）を harvest（育てきった株）に改める。
@@ -664,40 +679,59 @@ function pickSeed(season, exclude){
   const pool=fresh.length? fresh : (inSeason.length? inSeason : PLANT_IDS);
   return pool[Math.floor(Math.random()*pool.length)];
 }
-/* これまでに積み上がった育ちのぶん。記録した件数で数える。
-   1日に何件こなしても、こなしたぶんだけ育つ。 */
-function lifetimeGrowth(){
-  let p=0;
-  S.tasks.forEach(t=>{
-    if(!t.recordedAt) return;
-    p+=GROW_PER_RECORD;
-    if(t.done && t.estMin>0 && t.actMin>0 && isHit(t)) p+=GROW_PER_HIT;
-  });
-  return p;
+/* 記録1件が生む育ちのぶん。記録そのもので1、誤差10%以内でもう1。
+   勉強した時間の長さでは増えない。 */
+function growthOf(t){
+  if(!t || !t.recordedAt) return 0;
+  return GROW_PER_RECORD +
+    ((t.done && t.estMin>0 && t.actMin>0 && isHit(t))? GROW_PER_HIT : 0);
 }
+/* これまでの記録ぜんぶを足したぶん。今は古い保存からの移し替えにだけ使う。 */
+function lifetimeGrowth(){
+  return S.tasks.reduce((p,t)=>p+growthOf(t), 0);
+}
+/* 育ちは、株ごとの数取り器（grown）で持つ。
+
+   記録するたびに足し、記録を取り消したぶんは引く。
+   ぜんぶの記録から毎回引き直す作りにすると、収穫のときに引き当てた量が
+   取り残されて、記録を取り消したあと「何を記録しても育たない」時間が
+   できてしまう。株ごとに持たせておけば、足し引きがそのまま釣り合う。 */
+function plantGrowth(c){ return Math.max(0, (c && c.grown)||0); }
 /* 熟した株を収穫し、新しい種をまく。収穫した株の一覧を返す。
 
    熟した（＝必要量ちょうどに届いた）時点では収穫しない。
    ふくらんだ実を画面で見せたいので、収穫は「次の記録」まで待つ。
-   そのため比較は < ではなく <= を使う。 */
-function advanceGarden(){
+   そのため、必要量をまたぐ記録はいったん必要量ちょうどで止める。
+   （止めずに越させると、誤差10%以内の記録が2つぶん育てたときに
+     「熟した実」を一度も見せないまま収穫してしまう。） */
+function advanceGarden(delta){
   if(!S.garden) S.garden={current:null, harvest:[]};
   if(!S.garden.harvest) S.garden.harvest=[];
-  /* 数え方が変わった直後は、育てている株を今の値から数え直す。 */
-  if(S.garden.current && typeof S.garden.current.base!=="number")
-    S.garden.current.base=lifetimeGrowth();
-  if(!S.garden.current)
-    S.garden.current={id:pickSeed(seasonOf(today())), plantedAt:today(), base:lifetimeGrowth()};
+  const c0=S.garden.current;
+  /* 古い保存（育ちを記録全体から引き算していたころ）からの移し替え */
+  if(c0 && typeof c0.grown!=="number"){
+    c0.grown = (typeof c0.base==="number")? Math.max(0, lifetimeGrowth()-c0.base) : 0;
+    delete c0.base;
+  }
+  if(!c0)
+    S.garden.current={id:pickSeed(seasonOf(today())), plantedAt:today(), grown:0};
+  if(delta){
+    const c=S.garden.current, pl=PLANTS[c.id];
+    const full=pl? fullNeed(pl) : Infinity;
+    const next=plantGrowth(c)+delta;
+    c.grown = (delta>0 && c.grown<full)? Math.min(full, next) : Math.max(0, next);
+  }
   const newly=[];
   let guard=0;
   while(guard++<20){
     const c=S.garden.current, pl=PLANTS[c.id];
     if(!pl){ S.garden.current=null; break; }
     const full=fullNeed(pl);
-    if(lifetimeGrowth()-c.base <= full) break;
+    if(plantGrowth(c) <= full) break;
     S.garden.harvest.push({id:c.id, at:today()});
     newly.push(c.id);
-    S.garden.current={id:pickSeed(seasonOf(today()), c.id), plantedAt:today(), base:c.base+full};
+    S.garden.current={id:pickSeed(seasonOf(today()), c.id), plantedAt:today(),
+      grown:plantGrowth(c)-full};
   }
   return newly;
 }
@@ -705,9 +739,8 @@ function gardenState(){
   if(!S.garden||!S.garden.current) return null;
   const c=S.garden.current, pl=PLANTS[c.id];
   if(!pl) return null;
-  const base=(typeof c.base==="number")? c.base : lifetimeGrowth();
   const full=fullNeed(pl);
-  const pts=Math.max(0, lifetimeGrowth()-base);
+  const pts=Math.min(full, plantGrowth(c));
   const ratio=Math.min(1, pts/full);
   let stage=0;
   for(let i=STAGE_CUT.length-1;i>=0;i--){ if(ratio>=STAGE_CUT[i]-EPS){ stage=i; break; } }
@@ -720,7 +753,6 @@ function gardenState(){
   const harvest=S.garden.harvest||[];
   return {plant:pl, id:c.id, pts, need:full, ratio, stage, nextPct,
     next: stage<RIPE? STAGES[stage+1] : null,
-    bug: BUG_JA[pl.bug||"bee"],
     harvest, kinds:new Set(harvest.map(b=>b.id)).size};
 }
 /* 段階が進んだときの知らせ。結果の画面で1回だけ出す。 */
@@ -752,6 +784,13 @@ function petalShape(pl){
     return `<rect x="${-rx}" y="${-ry*1.9}" width="${rx*2}" height="${ry*1.9}" rx="${rx}"/>`;
   return `<ellipse cx="0" cy="${-ry*0.95}" rx="${rx}" ry="${ry}"/>`;
 }
+/* 花の外まわり。虫の置き場所と、枠に収める高さの計算に使う。 */
+function flowerR(pl){
+  if(pl.shape==="cup")     return pl.ry*1.7;
+  if(pl.shape==="trumpet") return pl.rx*1.5;
+  if(pl.shape==="point")   return pl.ry*2.05;
+  return pl.ry*1.95;
+}
 function bloomSVG(pl, cx, fy){
   /* 淡い花は、そのままだと背景に沈む。縁取りを持つ種だけ線を足す。 */
   const edge=pl.edge? ` stroke="${pl.edge}" stroke-width="0.9"` : "";
@@ -778,7 +817,7 @@ function bloomSVG(pl, cx, fy){
   const layers=pl.layers||1;
   let s="";
   for(let L=0;L<layers;L++){
-    const off=(360/pl.np)*(L/layers)/1;
+    const off=(360/pl.np)*(L/layers);
     const sc=L? 0.66 : 1;
     for(let i=0;i<pl.np;i++){
       const a=(360/pl.np)*i+off;
@@ -816,8 +855,6 @@ function fruitSVG(pl, x, y, ripe){
   /* 若い実は茎と同系色だと埋もれる。明るい黄緑にして輪郭を付ける。 */
   const c = ripe? (pl.fc||"#B98F4A") : "#B2CC6E";
   const k = ripe? 1 : 0.7;                        // 熟すとふくらむ
-  const gaku=`<path d="M${x-4.6*k} ${y-5.4*k} Q${x} ${y-8.6*k} ${x+4.6*k} ${y-5.4*k}
-    Q${x} ${y-3.4*k} ${x-4.6*k} ${y-5.4*k} Z" fill="#5C9A5C"/>`;
   if(pl.fs==="pod"){
     return `<path d="M${x} ${y-9*k} Q${x+5.4*k} ${y} ${x} ${y+9*k}
       Q${x-5.4*k} ${y} ${x} ${y-9*k} Z" fill="${c}" transform="rotate(14 ${x} ${y})"/>
@@ -833,6 +870,8 @@ function fruitSVG(pl, x, y, ripe){
     }
     return s+`<circle cx="${x}" cy="${y}" r="${r*0.9}" fill="none" stroke="#000" stroke-width="0.8" opacity=".12"/>`;
   }
+  const gaku=`<path d="M${x-4.6*k} ${y-5.4*k} Q${x} ${y-8.6*k} ${x+4.6*k} ${y-5.4*k}
+    Q${x} ${y-3.4*k} ${x-4.6*k} ${y-5.4*k} Z" fill="#5C9A5C"/>`;
   return gaku+`<ellipse cx="${x}" cy="${y}" rx="${7*k}" ry="${7.6*k}" fill="${c}"/>
     <ellipse cx="${x-2.2*k}" cy="${y-2.4*k}" rx="${2*k}" ry="${2.6*k}" fill="#fff" opacity=".26"/>`;
 }
@@ -852,18 +891,22 @@ function plantSVG(id, stage, size){
     s+=`<path d="M${cx} ${soil} Q${cx-3+bend*0.5} ${top+12} ${tx} ${top}" stroke="#5C9A5C" stroke-width="3.2" fill="none" stroke-linecap="round"/>`;
     if(stage>=1) s+=`<ellipse cx="${cx-9}" cy="${soil-h*0.42}" rx="9" ry="4.6" fill="#6EAE68" transform="rotate(-18 ${cx-9} ${soil-h*0.42})"/>`;
     if(stage>=2) s+=`<ellipse cx="${cx+10}" cy="${soil-h*0.66}" rx="10" ry="5" fill="#5C9A5C" transform="rotate(20 ${cx+10} ${soil-h*0.66})"/>`;
-    if(stage===3) s+=`<ellipse cx="${cx}" cy="${top-4}" rx="6" ry="9" fill="${pl.petal}" opacity=".8"/>
+    /* 淡い花はつぼみも落ちた花びらも背景に沈む。花と同じ縁取りを回す。 */
+    const edge=pl.edge? ` stroke="${pl.edge}" stroke-width="0.9"` : "";
+    if(stage===3) s+=`<ellipse cx="${cx}" cy="${top-4}" rx="6" ry="9" fill="${pl.petal}" opacity=".8"${edge}/>
       <path d="M${cx-6} ${top-1} Q${cx} ${top-12} ${cx+6} ${top-1}" stroke="#5C9A5C" stroke-width="2.4" fill="none"/>`;
-    if(stage===BLOOM||stage===POLLEN) s+=bloomSVG(pl, cx, top-7);
-    /* 受粉：花のわきに虫が来る。大きな花ほど外側に、ただし枠内に収める。 */
-    if(stage===POLLEN){
-      const fr = pl.shape==="cup"? pl.ry*1.7 : (pl.shape==="trumpet"? pl.rx*1.5 : pl.ry*2.05);
-      s+=bugSVG(pl.bug||"bee", Math.min(W-10, cx+fr+8), Math.max(11, top-7-fr*0.55));
+    if(stage===BLOOM||stage===POLLEN){
+      /* 花の高さぶんだけ下げて、大きな花が枠の上で切れないようにする。 */
+      const fr=flowerR(pl), fy=Math.max(fr+1, top-7);
+      s+=bloomSVG(pl, cx, fy);
+      /* 受粉：花のわきに虫が来る。大きな花ほど外側に、ただし枠内に収める。 */
+      if(stage===POLLEN) s+=bugSVG(pl.bug||"bee",
+        Math.min(W-10, cx+fr+8), Math.max(11, fy-fr*0.55));
     }
     /* 実：花びらは落ちて土の上に残る */
     if(stage>=FRUIT){
-      s+=`<ellipse cx="${cx-13}" cy="${soil+2}" rx="4.4" ry="2" fill="${pl.petal}" opacity=".55" transform="rotate(-14 ${cx-13} ${soil+2})"/>
-        <ellipse cx="${cx+12}" cy="${soil+5}" rx="4" ry="1.8" fill="${pl.petal}" opacity=".45" transform="rotate(12 ${cx+12} ${soil+5})"/>`;
+      s+=`<ellipse cx="${cx-13}" cy="${soil+2}" rx="4.4" ry="2" fill="${pl.petal}" opacity=".55"${edge} transform="rotate(-14 ${cx-13} ${soil+2})"/>
+        <ellipse cx="${cx+12}" cy="${soil+5}" rx="4" ry="1.8" fill="${pl.petal}" opacity=".45"${edge} transform="rotate(12 ${cx+12} ${soil+5})"/>`;
       s+=fruitSVG(pl, tx, top+1, stage>=RIPE);
     }
   }
@@ -1210,12 +1253,17 @@ function viewDone(){
       <button class="btn ghost" id="undo">記録を取り消す</button>
       <button class="btn quiet" id="back">戻る</button>`;
     if($("#move2")) $("#move2").onclick=async()=>{
-      t.missReason=null; t.recordedAt=null; await saveNow();
+      const back=growthOf(t);
+      t.missReason=null; t.recordedAt=null;
+      advanceGarden(-back);
+      await saveNow();
       go("pickdate",{mode:"move", draft:{date:t.planDate||today()},
         taskId:t.id, returnRoute:"applymove"});
     };
     $("#undo").onclick=async()=>{
+      const back=growthOf(t);
       t.done=false; t.doneAt=null; t.actMin=null; t.missReason=null; t.recordedAt=null;
+      advanceGarden(-back);
       await saveNow(); go("today");
     };
     $("#back").onclick=()=>go("today");
@@ -1240,11 +1288,11 @@ function viewDone(){
     const m=parseInt($("#am").value,10);
     if(!(m>0)) return toast("かかった時間を入れてください");
     const before=badgeInfo().list.map(x=>x.id);
-    const growBefore=lifetimeGrowth();
     const gBefore=gardenSnapshot();
+    const undo=growthOf(t);                      // 書き直しなら、前のぶんを取り消してから足す
     t.done=true; t.doneAt=today(); t.actMin=m; t.missReason=null; t.recordedAt=today();
-    const grew=lifetimeGrowth()-growBefore;
-    const harvested=advanceGarden();
+    const grew=growthOf(t);
+    const harvested=advanceGarden(grew-undo);
     await saveNow();
     const gained=badgeInfo().list.filter(x=>!before.includes(x.id));
     go("result",Object.assign({id:t.id, gained, harvested, grew}, gardenDiff(gBefore)));
@@ -1252,11 +1300,11 @@ function viewDone(){
   $("#ms").onclick=async e=>{
     const b=e.target.closest("[data-ms]"); if(!b) return;
     const before=badgeInfo().list.map(x=>x.id);
-    const growBefore=lifetimeGrowth();
     const gBefore=gardenSnapshot();
+    const undo=growthOf(t);
     t.missReason=b.dataset.ms; t.done=false; t.actMin=null; t.recordedAt=today();
-    const grew=lifetimeGrowth()-growBefore;
-    const harvested=advanceGarden();
+    const grew=growthOf(t);
+    const harvested=advanceGarden(grew-undo);
     await saveNow();
     const gained=badgeInfo().list.filter(x=>!before.includes(x.id));
     go("result",Object.assign({id:t.id, gained, harvested, grew}, gardenDiff(gBefore)));
@@ -1481,6 +1529,8 @@ function viewGoal(){
     const c=e.target.closest("[data-done]"); if(c) return go("done",{id:c.dataset.done});
     const d=e.target.closest("[data-del]");
     if(d){ if(await ask("このやることを削除しますか",{danger:true,okLabel:"削除"})){
+      /* 記録ずみのものを消すときは、それで育ったぶんも戻す */
+      advanceGarden(-growthOf(S.tasks.find(t=>t.id===d.dataset.del)));
       S.tasks=S.tasks.filter(t=>t.id!==d.dataset.del); await saveNow(); render(); } return; }
     if(e.target.closest("#add")) return go("taskadd",{goalId:g.id});
     if(e.target.closest("#close")||e.target.closest("#close2")||e.target.closest("#reopen"))
@@ -1488,6 +1538,7 @@ function viewGoal(){
     if(e.target.closest("#delg")){
       if(await ask("この目標を削除しますか",{body:"中のやることも消えます。",danger:true,okLabel:"削除"})){
         S.goals=S.goals.filter(x=>x.id!==g.id);
+        advanceGarden(-S.tasks.filter(t=>t.goalId===g.id).reduce((p,t)=>p+growthOf(t),0));
         S.tasks=S.tasks.filter(t=>t.goalId!==g.id);
         await saveNow(); go("goals");
       }
@@ -1677,7 +1728,7 @@ function viewReview(){
   <p class="sec">花壇</p>
   ${gardenCard()}
   ${(()=>{const g=gardenState(); const hv=(g&&g.harvest)||[];
-    return hv.length? `<div class="hint">育てきった株：${hv.length}・種類 ${g.kinds} / ${PLANT_IDS.length}</div><div class="bloomrow">${
+    return hv.length? `<div class="hint">育てきった株：${hv.length}・種類 ${g.kinds} / ${PLANT_IDS.length}（花のすがたで並べています）</div><div class="bloomrow">${
       hv.slice(-12).map(b=>`<div class="b">${plantSVG(b.id,BLOOM,42)}<span>${PLANTS[b.id]?PLANTS[b.id].n:""}</span></div>`).join("")
     }</div>` : `<div class="hint">記録するたびに育ちます（誤差${Math.round(HIT*100)}%以内の記録は2倍）。種から芽・つぼみ・花と進み、虫が来て受粉すると実がつき、ふくらんで熟します。全${PLANT_IDS.length}種。</div>`;})()}
 
