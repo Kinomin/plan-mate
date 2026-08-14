@@ -233,32 +233,45 @@ nav#tabs.hide{display:none;}
    ============================================================ */
 const Store = (() => {
   const DB="planmate_local", ST="kv", KEY="state";
-  let db=null, mem=null, ok=false;
+  const OPEN_MS=2500, READ_MS=4000;
+  let db=null, mem=null, ok=false, gaveUp=false;
   function open(){
     return new Promise(res=>{
       if(!("indexedDB" in window)) return res(false);
       let r;
       try{ r=indexedDB.open(DB,1); }catch(e){ return res(false); }
       r.onupgradeneeded=()=>{ r.result.createObjectStore(ST); };
-      r.onsuccess=()=>{ db=r.result; ok=true; res(true); };
+      r.onsuccess=()=>{
+        /* 待つのをやめたあとで開けた場合、ここで db を持つと
+           「読めなかったので空」の状態を、中身の入った保存先に
+           上書きしてしまう。あきらめたあとは受け取らない。 */
+        if(gaveUp){ try{ r.result.close(); }catch(e){} return; }
+        db=r.result; ok=true; res(true);
+      };
       r.onerror=()=>res(false);
-      setTimeout(()=>{ if(!ok) res(false); },2500);
+      setTimeout(()=>{ if(!ok){ gaveUp=true; res(false); } },OPEN_MS);
     });
   }
+  /* 読み出しにも見切りをつける。iOS では、成功も失敗も返らないまま
+     止まることがあり、そうなると起動が終わらず真っ白のままになる。 */
   function get(){
     return new Promise(res=>{
       if(!db) return res(mem);
+      let done=false;
+      const end=v=>{ if(!done){ done=true; res(v); } };
+      const timer=setTimeout(()=>{ gaveUp=true; end(undefined); },READ_MS);
+      const fin=v=>{ clearTimeout(timer); end(v); };
       try{
         const tx=db.transaction(ST,"readonly").objectStore(ST).get(KEY);
-        tx.onsuccess=()=>res(tx.result ?? mem);
-        tx.onerror=()=>res(mem);
-      }catch(e){ res(mem); }
+        tx.onsuccess=()=>fin(tx.result ?? mem);
+        tx.onerror=()=>fin(mem);
+      }catch(e){ fin(mem); }
     });
   }
   function set(v){
     mem=v;
     return new Promise(res=>{
-      if(!db) return res(false);
+      if(!db || gaveUp) return res(false);
       try{
         const tx=db.transaction(ST,"readwrite").objectStore(ST).put(v,KEY);
         tx.onsuccess=()=>res(true);
@@ -266,7 +279,10 @@ const Store = (() => {
       }catch(e){ res(false); }
     });
   }
-  return {open,get,set,persistent:()=>ok};
+  /* 読めなかったのか、空だったのかを、呼ぶ側が区別できるようにする。
+     読めなかったときに書き込むと、中身を消してしまう。 */
+  function seal(){ gaveUp=true; }
+  return {open,get,set,seal,persistent:()=>ok, lost:()=>gaveUp};
 })();
 
 /* ============================================================
@@ -386,7 +402,6 @@ function migrate(raw){
   out.v=SCHEMA;
   return {state:out};
 }
-function save(){ clearTimeout(save._t); save._t=setTimeout(()=>Store.set(S),250); }
 async function saveNow(){ clearTimeout(save._t); await Store.set(S); }
 
 /* ============================================================
@@ -486,9 +501,12 @@ function lengthStats(cut){
   return {enough:true, cut, nLong:lng.length, nShort:sht.length,
     long:rate(lng), short:rate(sht)};
 }
-const plannedOn=(d,exceptId)=>S.tasks.filter(t=>t.planDate===d && !t.done && t.id!==exceptId)
+/* まだ残っている予定。「できなかった」と記録したものは、
+   その日についてはもう閉じているので数えない。 */
+const isOpen=t=>!t.done && !t.missReason;
+const plannedOn=(d,exceptId)=>S.tasks.filter(t=>t.planDate===d && isOpen(t) && t.id!==exceptId)
   .reduce((s,t)=>s+(t.estMin||0),0);
-const remainingOfGoal=g=>S.tasks.filter(t=>t.goalId===g.id && !t.done)
+const remainingOfGoal=g=>S.tasks.filter(t=>t.goalId===g.id && isOpen(t))
   .reduce((s,t)=>s+(t.estMin||0),0);
 
 /* ============================================================
@@ -715,24 +733,25 @@ function advanceGarden(delta){
   }
   if(!c0)
     S.garden.current={id:pickSeed(seasonOf(today())), plantedAt:today(), grown:0};
-  if(delta){
-    const c=S.garden.current, pl=PLANTS[c.id];
-    const full=pl? fullNeed(pl) : Infinity;
-    const next=plantGrowth(c)+delta;
-    c.grown = (delta>0 && c.grown<full)? Math.min(full, next) : Math.max(0, next);
-  }
+  /* 足し引きはそのまま入れる。必要量で頭打ちにすると、
+     取り消しのときに引く量と食いちがい、記録して取り消しただけで
+     株が後ろに下がってしまう。 */
+  if(delta) S.garden.current.grown=Math.max(0, plantGrowth(S.garden.current)+delta);
   const newly=[];
   let guard=0;
   while(guard++<20){
     const c=S.garden.current, pl=PLANTS[c.id];
     if(!pl){ S.garden.current=null; break; }
-    const full=fullNeed(pl);
-    if(plantGrowth(c) <= full) break;
+    /* 収穫するのは、前の記録の時点ですでに熟していた株だけ。
+       こうすると、ふくらんだ実を必ず一度は画面で見せられる。 */
+    if(!(c.ripe && plantGrowth(c) > fullNeed(pl))) break;
     S.garden.harvest.push({id:c.id, at:today()});
     newly.push(c.id);
     S.garden.current={id:pickSeed(seasonOf(today()), c.id), plantedAt:today(),
-      grown:plantGrowth(c)-full};
+      grown:plantGrowth(c)-fullNeed(pl), ripe:false};
   }
+  const cur=S.garden.current;
+  if(cur && PLANTS[cur.id]) cur.ripe = plantGrowth(cur) >= fullNeed(PLANTS[cur.id]);
   return newly;
 }
 function gardenState(){
@@ -1042,7 +1061,7 @@ function advise(d){ // {subject, estMin, planDate, goalId, taskId}
    Web Crypto が使えない場所（file:// で開いたときなど）では
    簡単な計算に落ちるため、その旨を設定画面に出す。
    ============================================================ */
-let unlocked=false;
+let unlocked=false, lockTimer=null;
 const PIN_LEN=4;
 function randSalt(){
   const a=new Uint8Array(12);
@@ -1084,6 +1103,8 @@ function lockPenalty(n){
 /* ============================================================
    6. 画面の道具
    ============================================================ */
+/* PDFの下絵は1ページ8.7MBのキャンバスになる。画面を出るときに手放す。 */
+let sheetCache=null;
 const V=document.getElementById("view");
 const TABS=document.getElementById("tabs");
 const MODAL=document.getElementById("modal");
@@ -1120,7 +1141,21 @@ function render(){
     const b=V.querySelector("#rl"); if(b) b.onclick=()=>location.reload();
   }
 }
+/* 画面を切り替えるたびに、前の画面が置いていったものを片づける。
+
+   V.onclick は画面ごとに付け替えるので、付け替えない画面
+   （はじめの設定など）に移ると前の画面の反応が残る。
+   たとえば目標一覧の [data-g] が残ったまま、はじめの設定の
+   学年ボタン（同じ [data-g]）を押すと、目標を開こうとして
+   入力が消えてしまう。ロックの待ち時間タイマーと、
+   PDFの重い下絵も同じように、ここで手放す。 */
+function resetView(){
+  V.onclick=null;
+  if(lockTimer){ clearInterval(lockTimer); lockTimer=null; }
+  if(route!=="sheet") sheetCache=null;
+}
 function draw(){
+  resetView();
   if(!S.student){ TABS.classList.add("hide"); return viewSetup(); }
   if(hasPin() && !unlocked){ TABS.classList.add("hide"); return viewLock(); }
   TABS.classList.remove("hide");
@@ -1197,12 +1232,12 @@ function viewToday(){
   const list=S.tasks.filter(t=>t.planDate===td).sort((a,b)=>(a.done?1:0)-(b.done?1:0));
   const late=S.tasks.filter(t=>!t.done && !t.missReason && t.planDate && t.planDate<td)
     .sort((a,b)=>a.planDate.localeCompare(b.planDate));
-  const total=list.filter(t=>!t.done).reduce((s,t)=>s+t.estMin,0);
+  const total=list.filter(isOpen).reduce((s,t)=>s+t.estMin,0);
   const cap=dayCapacity(td);
   const st=streakInfo();
   V.innerHTML=`
   <div class="vhead"><p class="eyebrow">${fmt(td,true)}</p><h1 class="t">今日</h1>
-  <p class="sub">${list.length? `残り${list.filter(t=>!t.done).length}件・${mins(total)}／使える時間 ${mins(cap)}`
+  <p class="sub">${list.length? `残り${list.filter(isOpen).length}件・${mins(total)}／使える時間 ${mins(cap)}`
     : "予定はありません"}</p></div>
   ${gardenCard()}
   ${(()=>{const due=dueGoals(); if(!due.length) return "";
@@ -1252,14 +1287,12 @@ function viewDone(){
       ${t.missReason?`<button class="btn ghost" id="move2">べつの日にやり直す</button>`:""}
       <button class="btn ghost" id="undo">記録を取り消す</button>
       <button class="btn quiet" id="back">戻る</button>`;
-    if($("#move2")) $("#move2").onclick=async()=>{
-      const back=growthOf(t);
-      t.missReason=null; t.recordedAt=null;
-      advanceGarden(-back);
-      await saveNow();
+    /* 記録を消すのは、日付が決まってから。ここで先に消すと、
+       カレンダーで「選ばずに戻る」を押したときに、できなかった記録が
+       消えたまま戻ってきてしまう。 */
+    if($("#move2")) $("#move2").onclick=()=>
       go("pickdate",{mode:"move", draft:{date:t.planDate||today()},
-        taskId:t.id, returnRoute:"applymove"});
-    };
+        taskId:t.id, clearRecord:true, returnRoute:"applymove"});
     $("#undo").onclick=async()=>{
       const back=growthOf(t);
       t.done=false; t.doneAt=null; t.actMin=null; t.missReason=null; t.recordedAt=null;
@@ -1318,7 +1351,17 @@ async function viewApplyMove(){
   const t=S.tasks.find(x=>x.id===ctx.taskId);
   if(!t) return go("today");
   const nd=(ctx.draft||{}).date;
-  if(nd && nd!==t.planDate){ t.planDate=nd; await saveNow(); toast(`${fmt(nd)}に動かしました`); }
+  if(!nd) return go("today");
+  /* やり直しのときだけ、ここで「できなかった」の記録を取り消す。
+     育ったぶんも同じだけ戻す。 */
+  if(ctx.clearRecord){
+    const back=growthOf(t);
+    t.missReason=null; t.recordedAt=null;
+    advanceGarden(-back);
+  }
+  if(nd!==t.planDate) t.planDate=nd;
+  await saveNow();
+  toast(`${fmt(nd)}に動かしました`);
   go("today");
 }
 
@@ -1573,7 +1616,11 @@ function viewTaskAdd(){
   $("#dateBtn").onclick=()=>{
     const title=$("#ti").value.trim();
     const est=parseInt($("#em").value,10)||d.est;
-    go("pickdate",{mode:"task", draft:{title, est, date:d.date}, goalId:g.id, returnRoute:"taskadd"});
+    /* 下書きをまるごと持っていく。title/est/date だけ渡すと、
+       助言を見たかどうか（sawEst・edits・kinds）が落ちて、
+       「記録と食いちがった回数」が実際より少なく出てしまう。 */
+    go("pickdate",{mode:"task", draft:Object.assign({},d,{title, est}),
+      goalId:g.id, returnRoute:"taskadd"});
   };
   $("#ok").onclick=async()=>{
     const title=$("#ti").value.trim();
@@ -1621,7 +1668,7 @@ function viewPickDate(){
   if(mode==="goal"){
     S.goals.forEach(x=>{ if(x.deadline) markers[x.deadline]=(markers[x.deadline]||0)+1; });
   }else{
-    S.tasks.filter(t=>t.planDate && !t.done).forEach(t=>{ markers[t.planDate]=(markers[t.planDate]||0)+1; });
+    S.tasks.filter(t=>t.planDate && isOpen(t)).forEach(t=>{ markers[t.planDate]=(markers[t.planDate]||0)+1; });
   }
   const td=today();
   let cells="";
@@ -1822,6 +1869,7 @@ function viewSet(){
   <div class="hint">画面で中身を確かめてから、PDFにできます。</div>
   <button class="btn quiet" id="rs">すべての記録を消す</button>
   <div class="note">保存先：${Store.persistent()?"この端末（IndexedDB）":"<b>一時的な保存のみ</b>。閉じると消えます。"}<br>
+  ${Store.persistent()?"ホーム画面に追加しておくと、消えにくくなります。長く開かないと、端末の掃除で消えることがあります。<br>":""}
   版：${APP_VERSION}<br>
   このアプリは通信しません。記録が外に送られることはありません。AIも使いません。</div>`;
   $("#sv").onclick=async()=>{
@@ -1966,7 +2014,11 @@ function sheetPages(){
     }else if(b.t==="foot"){
       ctx.font=PG.small+" "+FONTS; ctx.fillStyle="#5A6169";
       const lines=wrapText(ctx,b.text,CW);
-      if(!room(lines.length*30+20)) newPage();
+      if(!room(lines.length*30+20)){
+        newPage();
+        /* 改ページで context が変わる。白のままだと白地に白で消える。 */
+        ctx.font=PG.small+" "+FONTS; ctx.fillStyle="#5A6169";
+      }
       y+=18;
       lines.forEach((ln,k)=>ctx.fillText(ln,PG.m,y+k*30));
       y+=lines.length*30;
@@ -2046,6 +2098,10 @@ function viewPin(){
     if(now.length<PIN_LEN) return;
     if(st.stage==="check"){
       const got=await hashPin(now, S.settings.pin.salt);
+      if(S.settings.pin.algo && got.algo!==S.settings.pin.algo){
+        st.a=""; paint();
+        return toast("この開き方では確かめられません。ふつうのブラウザで開いてください");
+      }
       if(got.h!==S.settings.pin.h){ st.a=""; paint(); return toast("一致しません"); }
       if(st.mode==="off"){
         delete S.settings.pin; S.settings.pinFails=0; S.settings.pinUntil=0;
@@ -2100,6 +2156,13 @@ function viewLock(){
     if(st.pin.length<PIN_LEN) return;
     const p=S.settings.pin;
     const got=await hashPin(st.pin, p.salt);
+    /* 作ったときと違う計算しか使えない端末では、正しい番号でも必ず
+       食いちがう。間違いとして数えると、正しく入れているのに
+       締め出されてしまうので、ここで分けて伝える。 */
+    if(p.algo && got.algo!==p.algo){
+      st.pin=""; st.bad=true; paint();
+      return toast("この開き方では確かめられません。ふつうのブラウザで開いてください");
+    }
     if(got.h===p.h){
       unlocked=true;
       S.settings.pinFails=0; S.settings.pinUntil=0;
@@ -2112,7 +2175,16 @@ function viewLock(){
     await saveNow();
     st.pin=""; st.bad=true; paint();
     toast(pen? "誤りが続いたので、少し待ってください" : "一致しません");
-    if(pen){ const t=setInterval(()=>{ if(!lockLeft()){ clearInterval(t); } paint(); },1000); }
+    if(pen){
+      if(lockTimer) clearInterval(lockTimer);
+      lockTimer=setInterval(()=>{
+        /* 画面が入れ替わっていたら、もう描かない（消えた鍵の画面を
+           上書きで出してしまい、押すと落ちるため） */
+        if(route!=="today" || !hasPin() || unlocked){ clearInterval(lockTimer); lockTimer=null; return; }
+        if(!lockLeft()){ clearInterval(lockTimer); lockTimer=null; }
+        paint();
+      },1000);
+    }
   };
   const forgot=async()=>{
     if(await ask("パスコードを忘れたときは",{
@@ -2125,16 +2197,15 @@ function viewLock(){
 }
 
 /* ---------- 記録シート：作られるPDFをそのまま見せる ---------- */
-let sheetCache=null;
 function viewSheet(){
   sheetCache=null;
   V.innerHTML=`
   <div class="vhead"><p class="eyebrow">記録シート</p><h1 class="t">PDFにする</h1>
   <p class="sub">下に出るものが、そのままPDFになります。</p></div>
-  <button class="btn" id="dl">PDFを保存する</button>
-  <button class="btn ghost" id="op">PDFを開く</button>
-  <div class="note">「保存する」でPDFファイルができます。うまく保存できないときは
-  「開く」を押すと、その場でPDFが出るので、そこから共有や保存ができます。</div>
+  <button class="btn" id="pdf">PDFを作る</button>
+  <div class="note">押すと、下に出ているものがそのままPDFになります。
+  端末によって、ファイルとして保存されるか、その場でPDFが開くかが変わります。
+  <b>開いたときは、そこから保存や共有ができます。</b></div>
   <div class="pdfprev" id="prev"><div class="empty">作成中です…</div></div>
   <button class="btn quiet" id="back">設定に戻る</button>`;
   $("#back").onclick=()=>go("set");
@@ -2160,40 +2231,72 @@ function viewSheet(){
     catch(e){ console.error(e); return toast("PDFを作れませんでした"); }
     fn(blob, pages.length);
   };
-  $("#dl").onclick=()=>withPdf((blob,n)=>{
+  /* ボタンは1つ。端末によって保存になるか、その場で開くかが変わるだけで、
+     こちらからできることは同じ（PDFを作って渡す）なので、分けない。 */
+  $("#pdf").onclick=()=>withPdf((blob,n)=>{
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
     a.href=url; a.download=`学習記録-${today()}.pdf`;
+    /* download を分かる端末はファイルとして保存し、分からない端末は
+       target のおかげでその場で開く。押す手順はどちらも同じ1回。 */
+    a.target="_blank"; a.rel="noopener";
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),60000);
     toast(`PDFを作りました（${n}ページ）`);
-  });
-  $("#op").onclick=()=>withPdf(blob=>{
-    const url=URL.createObjectURL(blob);
-    const win=window.open(url,"_blank");
-    if(!win) location.href=url;
-    setTimeout(()=>URL.revokeObjectURL(url),60000);
   });
 }
 
 /* ============================================================
    8. 起動
    ============================================================ */
+/* 記録を読めなかったときは、そこで止める。
+
+   ここで空の状態から始めさせると、名前を入れた時点で保存が走り、
+   まだ残っている本物の記録を上書きしてしまう。読めなかった場合は
+   書き込みを封じたうえで、開き直す道だけを見せる。 */
+function bootFailed(title, body){
+  Store.seal();
+  TABS.classList.add("hide");
+  document.getElementById("view").innerHTML=
+    `<div class="vhead"><h1 class="t">${esc(title)}</h1>
+     <p class="sub">記録は消していません。</p></div>
+     <div class="note">${esc(body)}</div>
+     <button class="btn" id="rl">開き直す</button>`;
+  const b=document.querySelector("#rl");
+  if(b) b.onclick=()=>location.reload();
+}
 (async()=>{
-  await Store.open();
-  const raw=await Store.get();
-  if(!raw){ S=blank(); }
-  else{
-    const r=migrate(raw);
-    if(r.error){
-      S=blank();
-      document.getElementById("view").innerHTML=
-        `<div class="vhead"><h1 class="t">記録を読めませんでした</h1></div>
-         <div class="note">新しく始めることはできますが、前の記録は表示できません。</div>`;
-    }else S=r.state;
+  try{
+    await Store.open();
+    const raw=await Store.get();
+    if(raw===undefined && Store.lost())
+      return bootFailed("記録を開けませんでした",
+        "この端末の保存を読み出せませんでした。通信の問題ではありません。"
+        +"少し時間をおいて開き直すと、読めることがあります。"
+        +"ブラウザの「プライベート」で開いている場合は、ふつうの窓で開いてください。");
+    if(!raw){ S=blank(); }
+    else{
+      const r=migrate(raw);
+      if(r.error)
+        return bootFailed("記録を読めませんでした",
+          r.error==="newer"
+          ? "この記録は、いまより新しい版のプランメイトで作られています。"
+            +"古い版で開くと壊れてしまうため、ここで止めました。"
+            +"新しい版で開き直してください（画面を引き下げて読み込み直すと直ることがあります）。"
+          : "保存されていた記録の形が読み取れませんでした。"
+            +"上書きしてしまわないよう、ここで止めています。");
+      S=r.state;
+    }
+    /* 端末の掃除で消されにくくする。断られても動きは変わらない。 */
+    if(navigator.storage && navigator.storage.persist){
+      try{ await navigator.storage.persist(); }catch(e){}
+    }
+    if(S.student) advanceGarden();
+    render();
+  }catch(err){
+    console.error(err);
+    bootFailed("開けませんでした", (err&&err.message)||String(err));
   }
-  if(S.student) advanceGarden();
-  render();
 })();
 </script>
 </body>
