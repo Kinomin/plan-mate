@@ -2050,7 +2050,7 @@ function viewSet(){
   バックアップの中身は、このアプリが書き出したそのままです。外には送られません。</div>
   <p class="sec">はじめから</p>
   <button class="btn quiet" id="rs">すべての記録を消す</button>
-  <div class="note">保存先：${Store.persistent()?"この端末（IndexedDB）":"<b>一時的な保存のみ</b>。閉じると消えます。"}<br>
+  <div class="note">保存先：${Store.persistent()?"この端末":"<b>一時的な保存のみ</b>。閉じると消えます。"}<br>
   ${Store.persistent()?"ホーム画面に追加しておくと、消えにくくなります。長く開かないと、端末の掃除で消えることがあります。<br>":""}
   版：${APP_VERSION}<br>
   このアプリは通信しません。記録が外に送られることはありません。AIも使いません。</div>`;
