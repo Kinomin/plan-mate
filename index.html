@@ -11,9 +11,9 @@
 <meta name="apple-mobile-web-app-title" content="プランメイト">
 <!-- アイコン。タブ用はこのファイルの中に持つので、1枚で開いても出る。
      ホーム画面用（iOS）は data: を受け取らない端末があるため、
-     この SVG から起こした icon-180.png を並べて置く。 -->
+     同じ絵から起こした icon.png を並べて置く。 -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'> <rect width='180' height='180' fill='%23FFFDF8'/> <ellipse cx='90' cy='140' rx='49' ry='12' fill='%23C9B896'/> <path d='M90 140 Q83 112 90 84' stroke='%235C9A5C' stroke-width='7' fill='none' stroke-linecap='round'/> <ellipse cx='69' cy='120' rx='19' ry='9.5' fill='%236EAE68' transform='rotate(-18 69 120)'/> <ellipse cx='111' cy='102' rx='21' ry='10.5' fill='%235C9A5C' transform='rotate(20 111 102)'/> <g fill='%23D9342A'> <ellipse cx='90' cy='63' rx='11.5' ry='16' transform='rotate(0 90 79)'/> <ellipse cx='90' cy='63' rx='11.5' ry='16' transform='rotate(60 90 79)'/> <ellipse cx='90' cy='63' rx='11.5' ry='16' transform='rotate(120 90 79)'/> <ellipse cx='90' cy='63' rx='11.5' ry='16' transform='rotate(180 90 79)'/> <ellipse cx='90' cy='63' rx='11.5' ry='16' transform='rotate(240 90 79)'/> <ellipse cx='90' cy='63' rx='11.5' ry='16' transform='rotate(300 90 79)'/> </g> <circle cx='90' cy='79' r='10.5' fill='%23F2D24E'/> </svg>">
-<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="apple-touch-icon" sizes="512x512" href="icon.png">
 <meta name="description" content="自分で見積もって、やって、ずれを見る。端末の中だけで動きます。">
 <style>
 /* ============================================================
@@ -36,6 +36,10 @@ body{
 button,input,select,textarea{font:inherit;color:inherit;}
 button{background:none;border:0;padding:0;cursor:pointer;}
 :focus-visible{outline:2px solid var(--red);outline-offset:2px;}
+
+/* 画面が入れ替わったことが目で分かるように、そのつど軽く出す */
+@keyframes viewin{from{opacity:0;transform:translateY(6px);} to{opacity:1;transform:none;}}
+.view.in{animation:viewin .17s cubic-bezier(.22,.9,.3,1);}
 
 #app{max-width:560px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;}
 .view{flex:1;padding:14px 18px calc(84px + var(--safe-b));}
@@ -222,7 +226,23 @@ nav#tabs.hide{display:none;}
   z-index:70;opacity:0;transition:opacity .18s;pointer-events:none;max-width:88%;text-align:center;}
 #toast.on{opacity:.95;}
 .hidden{display:none;}
-@media(prefers-reduced-motion:reduce){*{transition:none!important;}}
+
+/* 押した手ごたえ。
+   端末まかせのタップ反応（灰色の点滅）を上で消しているので、
+   代わりを自分で持たないと「押したのに何も起きない」と感じる。
+   色を決めている規則より後ろに置く。前に置くと、選ばれている
+   チップや閉じた目標では、そちらの色に負けて何も変わらない。
+   iOS は画面のどこかに touch の受け口が無いと :active が効かないため、
+   起動時に空の受け口をひとつ付けている。 */
+button:not(:disabled):active{opacity:.55;}
+.btn:not(:disabled):active{transform:translateY(1px);}
+.chip:active,.chip.on:active{background:var(--rule);}
+nav#tabs button:active{background:rgba(26,29,33,.07);}
+.goalcard:active,.goalcard.closed:active{background:var(--rule);}
+.item:active{background:var(--panel);}
+.cal-cell:not(:disabled):active{background:var(--rule);}
+
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;}}
 </style>
 </head>
 <body>
@@ -263,7 +283,9 @@ const Store = (() => {
      止まることがあり、そうなると起動が終わらず真っ白のままになる。 */
   function get(){
     return new Promise(res=>{
-      if(!db) return res(mem);
+      /* 開けずにあきらめたときは「空だった」ではなく「読めなかった」を返す。
+         null を返すと、中身の入った保存の上に空の画面を出してしまう。 */
+      if(!db) return res(gaveUp? undefined : mem);
       let done=false;
       const end=v=>{ if(!done){ done=true; res(v); } };
       const timer=setTimeout(()=>{ gaveUp=true; end(undefined); },READ_MS);
@@ -424,7 +446,7 @@ function migrate(raw){
   out.v=SCHEMA;
   return {state:out};
 }
-async function saveNow(){ clearTimeout(save._t); await Store.set(S); }
+async function saveNow(){ await Store.set(S); }
 
 /* ============================================================
    3. 日付
@@ -1183,9 +1205,16 @@ function ask(title,{body="",okLabel="はい",cancelLabel="やめる",danger=fals
   });
 }
 function go(r,c){ route=r; ctx=c||{}; window.scrollTo(0,0); render(); }
+/* 出るところを見せ直す。同じ要素の中身を入れ替えているだけなので、
+   いったん外して付け直さないと、二度目から動かない。 */
+function showView(){
+  V.classList.remove("in");
+  void V.offsetWidth;
+  V.classList.add("in");
+}
 
 function render(){
-  try{ draw(); }
+  try{ draw(); showView(); }
   catch(err){
     console.error(err);
     V.innerHTML=`<div class="vhead"><h1 class="t">画面を出せませんでした</h1>
@@ -1221,27 +1250,43 @@ function draw(){
     review:"review",set:"set",sheet:"set",pin:"set"};
   /* 日付を選ぶ画面は、呼ばれ方でどのタブにいるかが変わる */
   const g=(route==="pickdate" && ctx.mode==="sheet")? "set" : (GROUP[route]||"today");
-  TABS.innerHTML=[["today","今日"],["goals","目標"],["review","ふりかえり"],["set","設定"]]
-    .map(([k,l])=>`<button data-tab="${k}" class="${g===k?"on":""}">${l}</button>`).join("");
+  paintTabs(g);
   ({today:viewToday,done:viewDone,result:viewResult,applymove:viewApplyMove,
     goals:viewGoals,goaladd:viewGoalAdd,goal:viewGoal,goalclose:viewGoalClose,
     taskadd:viewTaskAdd,taskest:viewTaskEst,pickdate:viewPickDate,
     review:viewReview,set:viewSet,sheet:viewSheet,pin:viewPin}[route]||viewToday)();
 }
+/* タブは一度だけ作り、あとは光る場所を付け替えるだけにする。
+   毎回作り直すと、押している最中にその要素が消えてしまい、
+   押した見た目が出ないうえ、指を離す先が無くなって反応しないことがある。 */
+const TAB_DEFS=[["today","今日"],["goals","目標"],["review","ふりかえり"],["set","設定"]];
+function paintTabs(active){
+  if(!TABS.firstChild)
+    TABS.innerHTML=TAB_DEFS.map(([k,l])=>`<button data-tab="${k}">${l}</button>`).join("");
+  TABS.querySelectorAll("[data-tab]").forEach(b=>
+    b.classList.toggle("on", b.dataset.tab===active));
+}
 TABS.addEventListener("click",e=>{
   const b=e.target.closest("[data-tab]"); if(b) go(b.dataset.tab);
 });
+/* iOS は、touch の受け口がどこにも無いと :active を出さない。
+   何もしない受け口をひとつ置いて、押した見た目を有効にする。 */
+document.addEventListener("touchstart",()=>{},{passive:true});
 
 /* 見積りと実績を並べて見せる。このアプリの中心。 */
-function gauge(est,act){
+/* anim を立てると、幅を入れずに出す。あとから幅を入れて、伸びるところを見せる。
+   最初から style に幅を書くと、その指定が CSS の width:0 に勝ってしまい、
+   いきなり出来上がった棒が出てしまう。 */
+function gauge(est,act,anim){
   const max=Math.max(est,act||0)||1;
   const over=act!=null && act>est;
   const pct=n=>Math.max(2,Math.round((n/max)*100));
+  const w=p=>anim? "" : `width:${p}%`;
   return `<div class="gauge">
-    <div class="gbar"><i class="est" style="width:${pct(est)}%" data-w="${pct(est)}%"></i></div>
+    <div class="gbar"><i class="est" style="${w(pct(est))}" data-w="${pct(est)}%"></i></div>
     <div class="glab"><span>見積り</span><span class="gnum">${mins(est)}</span></div>
     ${act!=null?`<div class="gbar${over?" over":""}" style="margin-top:6px">
-      <i class="act" style="width:${pct(act)}%" data-w="${pct(act)}%"></i></div>
+      <i class="act" style="${w(pct(act))}" data-w="${pct(act)}%"></i></div>
     <div class="glab"><span>実際</span><span class="gnum">${mins(act)}　
       ${act===est?"的中":(over?"+":"−")+mins(Math.abs(act-est))}</span></div>`:""}
   </div>`;
@@ -1302,7 +1347,7 @@ function viewToday(){
     const g=due[0];
     return `<div class="advice warn"><div class="h">「${esc(g.title)}」の期限になりました</div>
       <div class="d">${due.length>1?`ほかに${due.length-1}件あります。`:""}</div>
-      <button class="chip" data-close="${g.id}" style="margin-top:8px">結果を書く</button></div>`;})()}
+      <button class="chip" data-close="${esc(g.id)}" style="margin-top:8px">結果を書く</button></div>`;})()}
   ${st.n>0?`<div class="streak"><span class="fire">🔥</span><div>
     <b>${st.n}日つづいています</b>
     <span>${st.today? "今日も記録しました" : "できた・できなかったにかかわらず、今日もひとつ記録すると続きます"}</span>
@@ -1324,8 +1369,9 @@ function viewToday(){
 function taskRow(t){
   const g=goalOf(t);
   const late=!t.done && t.planDate && t.planDate<today();
-  return `<div class="item">
-    <button class="cbx ${t.done?"on":""}" data-done="${t.id}" aria-label="記録する"></button>
+  /* 行ぜんぶを押せるようにする。22pxの四角だけだと、指では狙いにくい。 */
+  return `<div class="item" data-done="${esc(t.id)}" role="button" tabindex="0">
+    <button class="cbx ${t.done?"on":""}" data-done="${esc(t.id)}" aria-label="記録する"></button>
     <div class="body"><div class="tt ${t.done?"done":""}">${esc(t.title)}
       ${late?'<span class="tag late">'+relDay(t.planDate)+'</span>':""}</div>
       <div class="mm">${g?esc(g.subject)+"・":""}見積り ${mins(t.estMin)}${
@@ -1355,7 +1401,7 @@ function viewDone(){
       const back=growthOf(t);
       t.done=false; t.doneAt=null; t.actMin=null; t.missReason=null; t.recordedAt=null;
       advanceGarden(-back);
-      await saveNow(); go("today");
+      await saveNow(); toast("記録を取り消しました"); go("today");
     };
     $("#back").onclick=()=>go("today");
     return;
@@ -1386,7 +1432,7 @@ function viewDone(){
     const harvested=advanceGarden(grew-undo);
     await saveNow();
     const gained=badgeInfo().list.filter(x=>!before.includes(x.id));
-    go("result",Object.assign({id:t.id, gained, harvested, grew}, gardenDiff(gBefore)));
+    go("result",Object.assign({id:t.id, gained, harvested, grew:grew-undo}, gardenDiff(gBefore)));
   };
   $("#ms").onclick=async e=>{
     const b=e.target.closest("[data-ms]"); if(!b) return;
@@ -1398,14 +1444,17 @@ function viewDone(){
     const harvested=advanceGarden(grew-undo);
     await saveNow();
     const gained=badgeInfo().list.filter(x=>!before.includes(x.id));
-    go("result",Object.assign({id:t.id, gained, harvested, grew}, gardenDiff(gBefore)));
+    go("result",Object.assign({id:t.id, gained, harvested, grew:grew-undo}, gardenDiff(gBefore)));
   };
   $("#move").onclick=()=>go("pickdate",{mode:"move", draft:{date:t.planDate||today()},
     taskId:t.id, returnRoute:"applymove"});
   $("#back").onclick=()=>go("today");
 }
 /* ---------- 予定日を動かす ---------- */
-async function viewApplyMove(){
+/* この画面は何も描かない。日付を受け取って動かし、すぐ今日へ戻す。
+   draw() は画面を描く関数を待たずに呼ぶので、ここで await すると
+   前の画面が出たまま宙ぶらりんになる。保存の完了は待たずに進める。 */
+function viewApplyMove(){
   const t=S.tasks.find(x=>x.id===ctx.taskId);
   if(!t) return go("today");
   const nd=(ctx.draft||{}).date;
@@ -1418,7 +1467,7 @@ async function viewApplyMove(){
     advanceGarden(-back);
   }
   if(nd!==t.planDate) t.planDate=nd;
-  await saveNow();
+  saveNow().catch(e=>console.error(e));
   toast(`${fmt(nd)}に動かしました`);
   go("today");
 }
@@ -1438,7 +1487,7 @@ function viewResult(){
     <div class="note">できなかったことも、ちゃんとした記録です。<b>次の見積りの材料になります。</b></div>`
   : `<div class="verdict"><span class="mark">${vd.mark}</span>
       <div class="lead">${vd.lead}</div><div class="sub2">${esc(vd.sub)}</div></div>
-     <div class="reveal">${gauge(t.estMin,t.actMin)}</div>`}
+     <div class="reveal">${gauge(t.estMin,t.actMin,true)}</div>`}
   ${st.n>0?`<div class="streak" style="margin-top:14px"><span class="fire">🔥</span><div>
     <b>${st.n}日つづいています</b><span>${st.n===1?"ここから続いていきます":"記録した日が続いています"}</span>
     </div></div>`:""}
@@ -1457,7 +1506,9 @@ function viewResult(){
         ${gardenCard()}`
    : `<div class="advice flat"><div class="h">${
         ctx.grew>=2? `誤差${Math.round(HIT*100)}%以内だったので、2つぶん育ちました`
-                   : "この記録で、1つぶん育ちました"}</div>
+      : ctx.grew===1? "この記録で、1つぶん育ちました"
+      : ctx.grew===0? "書き直したので、育ちぶんは変わりません"
+                    : "書き直したぶん、育ちが戻りました"}</div>
       <div class="d">記録するたびに育ちます。1日に何件こなしても、こなしたぶんだけ進みます。</div></div>
       ${gardenCard()}`)}
   <button class="btn" id="next">続ける</button>`;
@@ -1483,7 +1534,7 @@ function viewGoals(){
     const prog=all.length? Math.round(dn/all.length*100) : 0;
     const soon = dl!=null && dl<=3;
     const closed=isClosed(g);
-    return `<button class="goalcard${closed?" closed":""}" data-g="${g.id}">
+    return `<button class="goalcard${closed?" closed":""}" data-g="${esc(g.id)}">
       <div class="gt">${esc(g.title)}</div>
       <div class="gmeta">
         <span class="pill sub">${esc(g.subject)}</span>
@@ -1524,7 +1575,7 @@ function viewGoalClose(){
     <button class="btn quiet" id="back">戻る</button>`;
     $("#undo").onclick=async()=>{
       if(await ask("ふりかえりを取り消しますか",{okLabel:"取り消す"})){
-        delete g.result; await saveNow(); go("goal",{id:g.id});
+        delete g.result; await saveNow(); toast("ふりかえりを取り消しました"); go("goal",{id:g.id});
       }
     };
     $("#back").onclick=()=>go("goal",{id:g.id});
@@ -1547,9 +1598,14 @@ function viewGoalClose(){
   <div class="note">点数で評価はしません。<b>達成できたかどうか</b>と、<b>計画がどこまで進んだか</b>を
   組み合わせて見ることで、次の目標の立て方が分かります。</div>
   <button class="btn quiet" id="later">あとにする</button>`;
+  let closing=false;
   const close=async achieved=>{
+    if(closing) return;
+    closing=true; $("#ok").disabled=true; $("#ng").disabled=true;
     g.result={achieved, note:$("#nt").value.trim(), at:today()};
-    await saveNow(); go("goalclose",{id:g.id});
+    await saveNow();
+    toast(achieved? "達成として記録しました" : "届かなかったとして記録しました");
+    go("goalclose",{id:g.id});
   };
   $("#ok").onclick=()=>close(true);
   $("#ng").onclick=()=>close(false);
@@ -1581,13 +1637,16 @@ function viewGoalAdd(){
   $("#dateBtn").onclick=()=>go("pickdate",{mode:"goal",
     draft:{title:$("#ti").value, subject:sub, now:$("#nw").value, deadline:d.deadline},
     returnRoute:"goaladd"});
+  let saving=false;
   $("#ok").onclick=async()=>{
+    if(saving) return;                       // 二度押しで同じ目標が2つできないように
     const title=$("#ti").value.trim();
     if(!title) return toast("目標を入れてください");
+    saving=true; $("#ok").disabled=true;
     const id=uid();
     S.goals.push({id,title,subject:sub,deadline:d.deadline||null,
       now:$("#nw").value.trim(),createdAt:today()});
-    await saveNow(); go("goal",{id});
+    await saveNow(); toast("目標を作りました"); go("goal",{id});
   };
   $("#back").onclick=()=>go("goals");
 }
@@ -1615,24 +1674,29 @@ function viewGoal(){
       rest>cap? "−"+mins(rest-cap) : "+"+mins(cap-rest)}</b></div>
   </div>${rest>cap?`<div class="hint">入りきっていません。やることを減らすか、期限か、使える時間を見直してください。</div>`:""}`:""}
   <p class="sec">やること</p>
-  ${all.length? all.map(t=>`<div class="item">
-    <button class="cbx ${t.done?"on":""}" data-done="${t.id}"></button>
+  ${all.length? all.map(t=>`<div class="item" data-done="${esc(t.id)}" role="button" tabindex="0">
+    <button class="cbx ${t.done?"on":""}" data-done="${esc(t.id)}"></button>
     <div class="body"><div class="tt ${t.done?"done":""}">${esc(t.title)}</div>
     <div class="mm">${t.planDate? fmt(t.planDate)+"・":""}見積り ${mins(t.estMin)}${
       t.estEdited? "（書き直した）":""}${t.done&&t.actMin!=null?"　→　実際 "+mins(t.actMin):""}${
       t.missReason?"　→　"+esc(MISS[t.missReason]):""}</div></div>
-    <button class="chip" data-del="${t.id}">削除</button></div>`).join("")
+    <button class="chip" data-del="${esc(t.id)}">削除</button></div>`).join("")
     : `<div class="empty">やることがまだありません</div>`}
   <button class="btn${closed?" ghost":""}" id="add">＋ やることを足す</button>
   ${(!closed && !isDue(g))?`<button class="btn ghost" id="close2">結果を書いて終わりにする</button>`:""}
   <button class="btn quiet" id="delg">この目標を削除する</button>`;
   V.onclick=async e=>{
-    const c=e.target.closest("[data-done]"); if(c) return go("done",{id:c.dataset.done});
+    /* 削除を先に見る。行ぜんぶが記録の入口になったので、
+       あとに回すと削除を押しても記録の画面に入ってしまう。 */
     const d=e.target.closest("[data-del]");
+    if(!d){
+      const c=e.target.closest("[data-done]"); if(c) return go("done",{id:c.dataset.done});
+    }
     if(d){ if(await ask("このやることを削除しますか",{danger:true,okLabel:"削除"})){
       /* 記録ずみのものを消すときは、それで育ったぶんも戻す */
       advanceGarden(-growthOf(S.tasks.find(t=>t.id===d.dataset.del)));
-      S.tasks=S.tasks.filter(t=>t.id!==d.dataset.del); await saveNow(); render(); } return; }
+      S.tasks=S.tasks.filter(t=>t.id!==d.dataset.del);
+      await saveNow(); toast("やることを削除しました"); render(); } return; }
     if(e.target.closest("#add")) return go("taskadd",{goalId:g.id});
     if(e.target.closest("#close")||e.target.closest("#close2")||e.target.closest("#reopen"))
       return go("goalclose",{id:g.id});
@@ -1641,7 +1705,7 @@ function viewGoal(){
         S.goals=S.goals.filter(x=>x.id!==g.id);
         advanceGarden(-S.tasks.filter(t=>t.goalId===g.id).reduce((p,t)=>p+growthOf(t),0));
         S.tasks=S.tasks.filter(t=>t.goalId!==g.id);
-        await saveNow(); go("goals");
+        await saveNow(); toast("目標を削除しました"); go("goals");
       }
     }
   };
@@ -1956,12 +2020,16 @@ function backupBlob(){
    ただし、この端末にまだ何も無いとき（端末を替えたときなど）は、
    足すも上書きも同じことなので、そのまま入れる。 */
 function backupDiff(st){
-  const fresh = !S.student && !S.tasks.length && !S.goals.length;
+  /* まだ記録が1件も無いなら、端末を替えた直後とみなして丸ごと入れる。
+     ここを「名前も無い」にすると、はじめの設定を終えないと読み込みに
+     たどり着けないため、いつまでも成り立たない条件になってしまう。 */
+  const fresh = !S.tasks.length && !S.goals.length;
   const gid=new Set(S.goals.map(g=>g.id));
   const tid=new Set(S.tasks.map(t=>t.id));
+  const ok=x=>x && typeof x.id==="string" && x.id;
   return { fresh,
-    goals:(st.goals||[]).filter(g=>g && g.id && !gid.has(g.id)),
-    tasks:(st.tasks||[]).filter(t=>t && t.id && !tid.has(t.id)) };
+    goals:(st.goals||[]).filter(g=>ok(g) && !gid.has(g.id)),
+    tasks:(st.tasks||[]).filter(t=>ok(t) && !tid.has(t.id)) };
 }
 function applyBackup(st, d){
   if(d.fresh){
@@ -2035,7 +2103,7 @@ function viewSet(){
   <p class="sec">1日に勉強に使える時間</p>
   <div class="field"><label>平日（月〜金）</label><input id="wd" type="number" inputmode="numeric" value="${S.settings.weekdayMin}"></div>
   <div class="field"><label>休日（土日）</label><input id="we" type="number" inputmode="numeric" value="${S.settings.weekendMin}"></div>
-  <button class="btn ghost" id="sv">学年と時間を保存する</button>
+  <button class="btn ghost" id="sv">使える時間を保存する</button>
   <p class="sec">パスコード</p>
   <button class="btn ghost" id="pin">${hasPin()? "パスコードを変える／やめる" : "パスコードをつける"}</button>
   <div class="hint">${hasPin()? "開くときに4けたの数字を聞きます。" : "開くときに4けたの数字を聞くようにできます。"}</div>
@@ -2059,19 +2127,22 @@ function viewSet(){
   ${Store.persistent()?"ホーム画面に追加しておくと、消えにくくなります。長く開かないと、端末の掃除で消えることがあります。<br>":""}
   版：${APP_VERSION}<br>
   このアプリは通信しません。記録が外に送られることはありません。AIも使いません。</div>`;
-  let grade=S.student.grade;
-  $("#gr").onclick=e=>{
+  /* 学年は押した時点で保存する。押して光っただけで保存されていないと、
+     画面を移った瞬間に元へ戻り、直したつもりが直っていない。 */
+  $("#gr").onclick=async e=>{
     const b=e.target.closest("[data-g]"); if(!b) return;
+    if(b.dataset.g===S.student.grade) return;
     V.querySelectorAll("#gr .chip").forEach(c=>c.classList.remove("on"));
-    b.classList.add("on"); grade=b.dataset.g;
+    b.classList.add("on");
+    /* 入れ直した学年は「いまの年度のもの」として数え直す */
+    S.student.grade=b.dataset.g; S.student.gradeYear=schoolYear(today());
+    await saveNow(); toast(`学年を${b.dataset.g}にしました`); render();
   };
   $("#sv").onclick=async()=>{
     const wd=parseInt($("#wd").value,10), we=parseInt($("#we").value,10);
     if(!(wd>0)||!(we>0)) return toast("分を入れてください");
     S.settings.weekdayMin=wd; S.settings.weekendMin=we;
-    /* 入れ直した学年は「いまの年度のもの」として数え直す */
-    S.student.grade=grade; S.student.gradeYear=schoolYear(today());
-    await saveNow(); toast("保存しました"); render();
+    await saveNow(); toast("使える時間を保存しました");
   };
   $("#pdf").onclick=()=>go("sheet");
   $("#pin").onclick=()=>go("pin");
@@ -2106,7 +2177,7 @@ function viewSet(){
   };
   $("#rs").onclick=async()=>{
     if(await ask("すべての記録を消しますか",{body:"元に戻せません。先にバックアップを書き出しておくと、あとから戻せます。",danger:true,okLabel:"消す"})){
-      S=blank(); advanceGarden(); await saveNow(); go("today");
+      S=blank(); advanceGarden(); await saveNow(); toast("すべて消しました"); go("today");
     }
   };
 }
@@ -2403,8 +2474,17 @@ function viewPin(){
 /* ---------- パスコードの画面 ---------- */
 function viewLock(){
   TABS.classList.add("hide");
-  const wait=lockLeft();
   const st={pin:"", bad:false};
+  /* 待ち時間の途中で開き直すと、数字が減らないまま固まってしまう。
+     残りがあるなら、ここでも時計を動かしておく。 */
+  const tick=()=>{
+    if(lockTimer) clearInterval(lockTimer);
+    lockTimer=setInterval(()=>{
+      if(route!=="today" || !hasPin() || unlocked){ clearInterval(lockTimer); lockTimer=null; return; }
+      if(!lockLeft()){ clearInterval(lockTimer); lockTimer=null; }
+      paint();
+    },1000);
+  };
   const paint=()=>{
     const w=lockLeft();
     V.innerHTML=`<div class="lockwrap">
@@ -2452,16 +2532,7 @@ function viewLock(){
     await saveNow();
     st.pin=""; st.bad=true; paint();
     toast(pen? "誤りが続いたので、少し待ってください" : "一致しません");
-    if(pen){
-      if(lockTimer) clearInterval(lockTimer);
-      lockTimer=setInterval(()=>{
-        /* 画面が入れ替わっていたら、もう描かない（消えた鍵の画面を
-           上書きで出してしまい、押すと落ちるため） */
-        if(route!=="today" || !hasPin() || unlocked){ clearInterval(lockTimer); lockTimer=null; return; }
-        if(!lockLeft()){ clearInterval(lockTimer); lockTimer=null; }
-        paint();
-      },1000);
-    }
+    if(pen) tick();
   };
   const forgot=async()=>{
     if(await ask("パスコードを忘れたときは",{
@@ -2471,6 +2542,7 @@ function viewLock(){
     }
   };
   paint();
+  if(lockLeft()) tick();
 }
 
 /* ---------- 記録シート：作られるPDFをそのまま見せる ---------- */
@@ -2506,8 +2578,9 @@ function viewSheet(){
     <button class="chip" data-r="-1">先月</button>
     <button class="chip" data-r="-3">この3か月</button>
     <button class="chip" data-r="all">すべて</button></div>
-  <div class="hint">この期間の記録：${d.rec.length}件（${d.days.size}日）</div>
-  <button class="btn" id="pdf"${d.rec.length?"":" disabled"}>PDFを作る</button>
+  <div class="hint">この期間の記録：${d.rec.length}件（${d.days.size}日）${
+    d.rec.length? "" : "　—　ほかの期間を選ぶと、記録が入ります"}</div>
+  <button class="btn" id="pdf">PDFを作る</button>
   <div class="note">押すと、下に出ているものがそのままPDFになります。
   端末によって、ファイルとして保存されるか、その場でPDFが開くかが変わります。
   <b>開いたときは、そこから保存や共有ができます。</b></div>
@@ -2539,7 +2612,7 @@ function viewSheet(){
   },30);
   /* ボタンは1つ。端末によって保存になるか、その場で開くかが変わるだけで、
      こちらからできることは同じ（PDFを作って渡す）なので、分けない。 */
-  $("#pdf").onclick=()=>downloadSheetPdf(r, build());
+  $("#pdf").onclick=()=>{ const pages=build(); if(pages) downloadSheetPdf(r, pages); };
 }
 
 /* ============================================================
