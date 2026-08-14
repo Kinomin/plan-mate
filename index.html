@@ -1,0 +1,1934 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>プランメイト</title>
+<meta name="theme-color" content="#FDFCF8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="プランメイト">
+<meta name="description" content="自分で見積もって、やって、ずれを見る。端末の中だけで動きます。">
+<style>
+/* ============================================================
+   依存ゼロ。外部からの読み込みは一切ない。
+   フォントはOS標準のみ。通信コードを含まない。
+   fetch / XMLHttpRequest は使用しない。
+   ============================================================ */
+:root{
+  --paper:#FFFDF8; --ink:#1A1D21; --ink-soft:#5A6169; --ink-faint:#9AA2A9;
+  --red:#D9342A; --indigo:#2A5D8A; --rule:#E4E1D8; --panel:#F7F5EF; --gold:#B8860B;
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP","Meiryo",sans-serif;
+  font-size:15px;line-height:1.7;overscroll-behavior-y:none;
+}
+button,input,select,textarea{font:inherit;color:inherit;}
+button{background:none;border:0;padding:0;cursor:pointer;}
+:focus-visible{outline:2px solid var(--red);outline-offset:2px;}
+
+#app{max-width:560px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;}
+.view{flex:1;padding:14px 18px calc(84px + var(--safe-b));}
+.vhead{padding-top:10px;}
+.eyebrow{font-size:11px;letter-spacing:.16em;color:var(--ink-faint);margin:0 0 2px;}
+h1.t{font-size:23px;font-weight:800;margin:0 0 3px;letter-spacing:.01em;}
+p.sub{font-size:12.5px;color:var(--ink-soft);margin:0 0 16px;}
+.sec{font-size:11px;letter-spacing:.14em;color:var(--ink-faint);margin:22px 0 6px;}
+
+nav#tabs{
+  position:fixed;bottom:0;left:0;right:0;z-index:40;display:flex;
+  background:rgba(247,245,239,.97);border-top:1px solid var(--rule);
+  padding-bottom:var(--safe-b);backdrop-filter:blur(8px);
+}
+nav#tabs button{flex:1;padding:10px 0 12px;font-size:10.5px;color:var(--ink-faint);}
+nav#tabs button.on{color:var(--red);font-weight:700;box-shadow:inset 0 2px 0 var(--red);}
+nav#tabs.hide{display:none;}
+
+.field{border-bottom:1px solid var(--rule);padding:10px 0;}
+.field label{display:block;font-size:11px;letter-spacing:.1em;color:var(--ink-faint);margin-bottom:2px;}
+.field input,.field select,.field textarea{
+  width:100%;border:0;background:none;padding:4px 0;font-size:16px;outline:none;
+}
+.field textarea{resize:vertical;min-height:60px;font-size:15px;}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;}
+.chip{
+  border:1px solid var(--rule);border-radius:999px;padding:5px 12px;
+  font-size:12.5px;color:var(--ink-soft);background:var(--paper);
+}
+.chip.on{border-color:var(--red);color:var(--red);font-weight:700;background:#FFF6F5;}
+.btn{
+  display:block;width:100%;margin:18px 0 0;padding:13px;border-radius:10px;
+  background:var(--ink);color:var(--paper);font-weight:700;font-size:15px;text-align:center;
+}
+.btn.ghost{background:none;color:var(--ink-soft);border:1px solid var(--rule);font-weight:600;margin-top:8px;}
+.btn.quiet{background:none;color:var(--ink-faint);border:0;font-weight:600;font-size:13px;margin-top:10px;}
+.btn:disabled{opacity:.4;}
+
+.item{display:flex;align-items:flex-start;gap:11px;padding:11px 0;border-bottom:1px solid var(--rule);}
+.item .body{flex:1;min-width:0;}
+.item .tt{font-size:14.5px;font-weight:600;line-height:1.45;}
+.item .tt.done{color:var(--ink-faint);text-decoration:line-through;}
+.item .mm{font-size:11.5px;color:var(--ink-faint);}
+.cbx{
+  width:22px;height:22px;flex:none;margin-top:2px;border:1.6px solid var(--rule);
+  border-radius:6px;background:var(--paper);
+}
+.cbx.on{border-color:var(--red);background:var(--red);position:relative;}
+.cbx.on::after{content:"";position:absolute;left:6px;top:2px;width:5px;height:10px;
+  border:2px solid #fff;border-top:0;border-left:0;transform:rotate(42deg);}
+.tag{font-size:10px;border-radius:4px;padding:1px 5px;margin-left:5px;vertical-align:2px;}
+.tag.due{background:#FDECEB;color:var(--red);}
+.tag.late{background:#F3EFE2;color:var(--gold);}
+
+.card{border:1px solid var(--rule);border-radius:12px;padding:13px 15px;background:var(--panel);margin-top:8px;}
+.stat{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;
+  border-bottom:1px dotted var(--rule);font-size:13px;color:var(--ink-soft);}
+.stat:last-child{border-bottom:0;}
+.stat b{font-size:16px;color:var(--ink);font-weight:700;}
+.note{background:var(--panel);border-radius:10px;padding:11px 13px;font-size:12.5px;
+  color:var(--ink-soft);line-height:1.75;margin-top:12px;}
+.empty{color:var(--ink-faint);font-size:13px;text-align:center;padding:30px 0;}
+.hint{font-size:11px;color:var(--ink-faint);margin-top:4px;}
+
+/* 見積りと実績の対比。このアプリの中心になる表示。 */
+.gauge{margin:9px 0 2px;}
+.gbar{height:9px;border-radius:5px;background:#EDE9DF;position:relative;overflow:hidden;}
+.gbar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;display:block;}
+.gbar i.est{background:#C9D6E2;}
+.gbar i.act{background:var(--indigo);}
+.gbar.over i.act{background:var(--red);}
+.glab{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-faint);margin-top:3px;}
+.gnum{font-variant-numeric:tabular-nums;}
+
+/* 助言 */
+.advice{border-left:3px solid var(--indigo);background:var(--panel);
+  border-radius:0 10px 10px 0;padding:10px 13px;margin-top:10px;}
+.advice .h{font-size:13px;font-weight:700;line-height:1.5;}
+.advice .d{font-size:12.5px;color:var(--ink-soft);margin-top:3px;}
+.advice.warn{border-left-color:var(--red);}
+.advice.flat{border-left-color:var(--rule);}
+
+/* 記録ストリーク：完了だけでなく、できなかった記録でも続く */
+.streak{display:flex;align-items:center;gap:10px;background:var(--panel);
+  border-radius:12px;padding:11px 14px;margin-bottom:10px;}
+.streak .fire{font-size:21px;line-height:1;}
+.streak b{font-size:16px;font-weight:800;}
+.streak span{display:block;font-size:11.5px;color:var(--ink-soft);margin-top:1px;}
+
+/* 称号：見積りの誤差が縮まったことに対してだけ出す。順位や点数は出さない */
+.badge{border:1px solid var(--gold);background:#FBF6E9;border-radius:12px;padding:12px 14px;margin-top:10px;}
+.badge .h{font-weight:700;font-size:14px;color:#8a6508;}
+.badge .d{font-size:12.5px;color:var(--ink-soft);margin-top:3px;line-height:1.6;}
+.badge.quiet{border-color:var(--rule);background:var(--panel);}
+.badge.quiet .h{color:var(--ink);}
+
+/* 結果発表：見積りと実際が並ぶ瞬間を、このアプリのいちばんの見せ場にする */
+.reveal .gbar i{width:0;transition:width .75s cubic-bezier(.22,.9,.3,1);}
+.verdict{text-align:center;padding:14px 0 4px;}
+.verdict .mark{font-size:44px;line-height:1;display:inline-block;
+  animation:pop .5s cubic-bezier(.2,1.5,.4,1) both;}
+.verdict .lead{font-size:20px;font-weight:800;margin-top:8px;}
+.verdict .sub2{font-size:13px;color:var(--ink-soft);margin-top:3px;}
+@keyframes pop{from{transform:scale(.4);opacity:0;} to{transform:scale(1);opacity:1;}}
+.newbadge{animation:rise .5s .35s cubic-bezier(.2,1.2,.4,1) both;}
+@keyframes rise{from{transform:translateY(10px);opacity:0;} to{transform:translateY(0);opacity:1;}}
+
+/* 花だん：記録した日に育つ。勉強した量では育たない。 */
+.garden{background:linear-gradient(#F4F7FB 0%,#FBFAF4 62%,#F0EADB 62%,#EDE5D2 100%);
+  border:1px solid var(--rule);border-radius:14px;padding:8px 10px 4px;margin-bottom:12px;
+  display:flex;align-items:flex-end;gap:12px;}
+.garden svg{flex:none;}
+.garden .gtxt{flex:1;padding-bottom:12px;}
+.garden .gname{font-size:14px;font-weight:800;}
+.garden .gstage{font-size:11.5px;color:var(--ink-soft);margin-top:1px;}
+.gmeter{height:7px;border-radius:4px;background:#E2DDCD;margin-top:6px;overflow:hidden;}
+.gmeter i{display:block;height:100%;border-radius:4px;background:#5C9A5C;}
+.bloomrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+.bloomrow .b{border:1px solid var(--rule);border-radius:10px;background:var(--paper);
+  padding:5px 8px 2px;text-align:center;}
+.bloomrow .b span{display:block;font-size:10px;color:var(--ink-faint);}
+
+/* 目標は、ひと目で読めることを最優先にする */
+.goalcard{border:1px solid var(--rule);border-radius:14px;padding:15px 16px;margin-top:10px;
+  background:var(--paper);display:block;width:100%;text-align:left;}
+.goalcard .gt{font-size:21px;font-weight:800;line-height:1.35;letter-spacing:.01em;}
+.goalcard .gmeta{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;}
+.goalcard .pill{font-size:12px;border-radius:999px;padding:3px 10px;background:var(--panel);color:var(--ink-soft);}
+.goalcard .pill.soon{background:#FDECEB;color:var(--red);font-weight:700;}
+.goalcard .pill.sub{background:#EAF1F7;color:var(--indigo);font-weight:700;}
+.goalcard .pill.ok{background:#E9F2E9;color:#3F7A3F;font-weight:700;}
+.goalcard .pill.ng{background:#F3EFE2;color:var(--gold);font-weight:700;}
+.goalcard.closed{background:var(--panel);}
+.goalcard.closed .gt{color:var(--ink-soft);font-size:18px;}
+.goalbar{height:6px;border-radius:3px;background:#EDE9DF;margin-top:11px;overflow:hidden;}
+.goalbar i{display:block;height:100%;background:var(--indigo);border-radius:3px;}
+
+/* PDFのプレビュー。実際に作られるページ画像をそのまま出すので、
+   画面で見たものと保存されるPDFが必ず一致する。 */
+.pdfprev{margin-top:14px;}
+.pdfpage{width:100%;height:auto;display:block;background:#fff;
+  border:1px solid var(--rule);border-radius:8px;margin-bottom:10px;}
+.pdfnote{font-size:11px;color:var(--ink-faint);text-align:center;margin:-4px 0 12px;}
+
+/* パスコード */
+.lockwrap{max-width:560px;margin:0 auto;padding:60px 28px calc(40px + var(--safe-b));
+  min-height:100%;display:flex;flex-direction:column;justify-content:center;}
+.dots{display:flex;gap:16px;justify-content:center;margin:22px 0 8px;}
+.dots i{width:14px;height:14px;border-radius:50%;border:1.6px solid var(--ink-faint);}
+.dots i.on{background:var(--ink);border-color:var(--ink);}
+.dots.bad i{border-color:var(--red);}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:26px;}
+.pad button{padding:16px 0;border-radius:12px;border:1px solid var(--rule);
+  background:var(--paper);font-size:22px;font-weight:600;}
+.pad button.fn{font-size:14px;font-weight:600;color:var(--ink-soft);border-color:transparent;}
+.pad button:active{background:var(--panel);}
+
+/* カレンダー選択 *//* カレンダー選択 *//* カレンダー選択 */
+.calnav{display:flex;gap:8px;margin:2px 0 12px;}
+.calnav .chip{flex:1;text-align:center;}
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+.cal-wd{font-size:10px;color:var(--ink-faint);text-align:center;padding:4px 0;}
+.cal-cell{aspect-ratio:1;border-radius:9px;border:1px solid transparent;background:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:13px;}
+.cal-cell.blank{visibility:hidden;}
+.cal-cell.past{color:var(--ink-faint);opacity:.38;}
+.cal-cell.today{border-color:var(--rule);font-weight:700;}
+.cal-cell.sel{background:var(--ink);color:var(--paper);}
+.cal-cell .dot{width:5px;height:5px;border-radius:50%;background:var(--indigo);}
+.cal-cell .dot.full{background:var(--red);}
+.cal-cell.sel .dot{background:var(--paper);}
+
+#modal{position:fixed;inset:0;z-index:60;background:rgba(26,29,33,.42);
+  display:flex;align-items:flex-end;justify-content:center;}
+#modal.hidden{display:none;}
+#modal .box{background:var(--paper);width:100%;max-width:560px;border-radius:16px 16px 0 0;
+  padding:20px 20px calc(20px + var(--safe-b));}
+#modal h2{font-size:17px;margin:0 0 6px;}
+#modal p{font-size:13px;color:var(--ink-soft);margin:0;}
+#toast{position:fixed;left:50%;bottom:calc(96px + var(--safe-b));transform:translateX(-50%);
+  background:var(--ink);color:var(--paper);font-size:13px;padding:9px 16px;border-radius:999px;
+  z-index:70;opacity:0;transition:opacity .18s;pointer-events:none;max-width:88%;text-align:center;}
+#toast.on{opacity:.95;}
+.hidden{display:none;}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;}}
+</style>
+</head>
+<body>
+<div id="app"><div class="view" id="view"></div></div>
+<nav id="tabs" class="hide"></nav>
+<div id="modal" class="hidden"></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   1. 保存層
+   IndexedDB を第一とし、失敗時のみメモリ上に保持する。
+   通信は行わない。
+   ============================================================ */
+const Store = (() => {
+  const DB="planmate_local", ST="kv", KEY="state";
+  let db=null, mem=null, ok=false;
+  function open(){
+    return new Promise(res=>{
+      if(!("indexedDB" in window)) return res(false);
+      let r;
+      try{ r=indexedDB.open(DB,1); }catch(e){ return res(false); }
+      r.onupgradeneeded=()=>{ r.result.createObjectStore(ST); };
+      r.onsuccess=()=>{ db=r.result; ok=true; res(true); };
+      r.onerror=()=>res(false);
+      setTimeout(()=>{ if(!ok) res(false); },2500);
+    });
+  }
+  function get(){
+    return new Promise(res=>{
+      if(!db) return res(mem);
+      try{
+        const tx=db.transaction(ST,"readonly").objectStore(ST).get(KEY);
+        tx.onsuccess=()=>res(tx.result ?? mem);
+        tx.onerror=()=>res(mem);
+      }catch(e){ res(mem); }
+    });
+  }
+  function set(v){
+    mem=v;
+    return new Promise(res=>{
+      if(!db) return res(false);
+      try{
+        const tx=db.transaction(ST,"readwrite").objectStore(ST).put(v,KEY);
+        tx.onsuccess=()=>res(true);
+        tx.onerror=()=>res(false);
+      }catch(e){ res(false); }
+    });
+  }
+  return {open,get,set,persistent:()=>ok};
+})();
+
+/* ============================================================
+   2. 状態
+   ============================================================ */
+const APP_VERSION="2026.08.13-g";
+const SCHEMA=6;
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+const SUBJECTS=["国語","数学","英語","理科","社会","その他"];
+const MISS={
+  time:"予定した時間では足りなかった",
+  slot:"そもそも時間が取れなかった",
+  hard:"内容が難しすぎた"
+};
+/* 記録がこの数に満たないうちは、傾向を出さない。
+   少ない記録で線を引くと、実際より大きく見えてしまうため。 */
+const MIN_SUBJ=3, MIN_LONG=5, MIN_TREND=5, MIN_BADGE=6;
+
+let S=null, route="today", ctx={};
+
+function blank(){
+  return { v:SCHEMA, student:null, goals:[], tasks:[],
+    garden:{ current:null, bloomed:[] },
+    settings:{ weekdayMin:60, weekendMin:120 } };
+}
+const MIGRATIONS={
+  /* v5 → v6：目標の数字（点数・偏差値・単位）をやめて、備考にまとめた。
+     入力が細かくなりすぎ、単位によっては「いまの分」のような
+     意味の通らないラベルになってしまったため。
+     古いデータに残っている数字は、そのまま置いておくが使わない。 */
+  5(st){
+    (st.goals||[]).forEach(g=>{
+      if(g.result && g.result.note===undefined)
+        g.result.note = (typeof g.result.actual==="number")? `実際は ${g.result.actual}` : "";
+    });
+    return st;
+  },
+  /* v4 → v5：目標に数字（いま／目標）を持たせた。
+     古い目標には数字がないので、そのままにする。
+     数字がない目標は、結果を書くときに達成かどうかを自分で選ぶ。 */
+  4(st){ return st; },
+  /* v3 → v4：助言の記録のしかたを直した。
+     v3までは「保存した瞬間に警告が残っていたか」で advised を決めていたため、
+     助言に従って直した生徒が advised=false になっていた。
+     過去ぶんは正しく復元できないので、印だけ付けて集計から外す。 */
+  3(st){
+    (st.tasks||[]).forEach(t=>{
+      if(t.advisedPlan===undefined) t.advisedPlan=false;
+      if(t.adviceStale===undefined) t.adviceStale=true;
+    });
+    return st;
+  },
+  // v2 → v3：花だんの新設。
+  2(st){
+    if(!st.garden) st.garden={current:null, bloomed:[]};
+    st.settings=st.settings||{};
+    return st;
+  },
+  // v1 → v2：記録日(recordedAt)の新設。ストリークの計算に使う。
+  1(st){
+    (st.tasks||[]).forEach(t=>{
+      if(t.recordedAt===undefined) t.recordedAt = t.done? (t.doneAt||null) : null;
+    });
+    return st;
+  }
+};
+function migrate(raw){
+  let st;
+  try{ st=JSON.parse(JSON.stringify(raw)); }catch(e){ return {error:"broken"}; }
+  if(typeof st.v!=="number") st.v=1;
+  if(st.v>SCHEMA) return {error:"newer", found:st.v};
+  while(st.v<SCHEMA){
+    const step=MIGRATIONS[st.v];
+    if(!step){ st.v=SCHEMA; break; }
+    try{ st=step(st); }catch(e){ return {error:"failed", at:st.v}; }
+    st.v++;
+  }
+  const out=Object.assign(blank(),st);
+  out.settings=Object.assign(blank().settings, st.settings||{});
+  out.v=SCHEMA;
+  return {state:out};
+}
+function save(){ clearTimeout(save._t); save._t=setTimeout(()=>Store.set(S),250); }
+async function saveNow(){ clearTimeout(save._t); await Store.set(S); }
+
+/* ============================================================
+   3. 日付
+   toISOString は時差でずれるため使わない。すべてローカルで組む。
+   ============================================================ */
+const pad=n=>String(n).padStart(2,"0");
+const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const today=()=>iso(new Date());
+function addDays(s,n){ const d=new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return iso(d); }
+function diffDays(a,b){ return Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000); }
+const WD=["日","月","火","水","木","金","土"];
+function dow(s){ return new Date(s+"T00:00:00").getDay(); }
+const isWeekend=s=>{ const d=dow(s); return d===0||d===6; };
+function fmt(s,withYear){
+  if(!s) return "";
+  const d=new Date(s+"T00:00:00");
+  const base=`${d.getMonth()+1}/${d.getDate()}（${WD[d.getDay()]}）`;
+  return withYear? `${d.getFullYear()}年 ${base}` : base;
+}
+function relDay(s){
+  const d=diffDays(today(),s);
+  if(d===0) return "今日"; if(d===1) return "明日"; if(d===-1) return "昨日";
+  return d<0? `${-d}日前` : `${d}日後`;
+}
+function mins(n){
+  if(n==null) return "—";
+  if(n<60) return `${n}分`;
+  const h=Math.floor(n/60), m=n%60;
+  return m? `${h}時間${m}分` : `${h}時間`;
+}
+/* fromの翌日からtoまで（両端のうちfromは含めない＝今日ぶんは別に数える） */
+function capacityBetween(from,to){
+  let sum=0;
+  const n=diffDays(from,to);
+  for(let i=1;i<=n;i++){
+    const d=addDays(from,i);
+    sum += isWeekend(d)? S.settings.weekendMin : S.settings.weekdayMin;
+  }
+  return sum;
+}
+const dayCapacity=d=> isWeekend(d)? S.settings.weekendMin : S.settings.weekdayMin;
+
+/* 月カレンダー用 */
+const ymOf=s=>s.slice(0,7);
+function monthBounds(ym){
+  const [y,m]=ym.split("-").map(Number);
+  return { daysInMonth:new Date(y,m,0).getDate(), startWD:new Date(y,m-1,1).getDay() };
+}
+function shiftYm(ym,n){
+  const [y,m]=ym.split("-").map(Number);
+  const d=new Date(y,m-1+n,1);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
+}
+function monthLabel(ym){
+  const [y,m]=ym.split("-").map(Number);
+  return `${y}年${m}月`;
+}
+
+/* ============================================================
+   4. 集計
+   ここで出す数値は、すべて記録から機械的に計算したもの。
+   推測や予測は行わない。
+   ============================================================ */
+const goalOf=t=>S.goals.find(g=>g.id===t.goalId)||null;
+const subjectOf=t=>{ const g=goalOf(t); return g? g.subject : null; };
+const doneTasks=()=>S.tasks.filter(t=>t.done && t.actMin>0 && t.estMin>0);
+
+function ratioList(list){
+  return list.map(t=>t.actMin/t.estMin).sort((a,b)=>a-b);
+}
+function median(a){
+  if(!a.length) return null;
+  const m=Math.floor(a.length/2);
+  return a.length%2? a[m] : (a[m-1]+a[m])/2;
+}
+/* 教科ごとの、見積りに対する実績の倍率 */
+function subjectStats(sub){
+  const l=doneTasks().filter(t=>subjectOf(t)===sub);
+  if(l.length<MIN_SUBJ) return {n:l.length, enough:false};
+  const r=ratioList(l);
+  return {n:l.length, enough:true, med:median(r)};
+}
+function overallStats(){
+  const l=doneTasks();
+  if(!l.length) return {n:0, enough:false};
+  const r=ratioList(l);
+  return {n:l.length, enough:l.length>=MIN_SUBJ, med:median(r)};
+}
+/* 長い予定と短い予定で、終わった割合が違うか */
+function lengthStats(cut){
+  cut=cut||60;
+  const closed=S.tasks.filter(t=>t.estMin>0 && (t.done || t.missReason));
+  const lng=closed.filter(t=>t.estMin>=cut), sht=closed.filter(t=>t.estMin<cut);
+  if(lng.length<MIN_LONG) return {enough:false, n:lng.length};
+  const rate=a=>a.length? a.filter(t=>t.done).length/a.length : null;
+  return {enough:true, cut, nLong:lng.length, nShort:sht.length,
+    long:rate(lng), short:rate(sht)};
+}
+const plannedOn=(d,exceptId)=>S.tasks.filter(t=>t.planDate===d && !t.done && t.id!==exceptId)
+  .reduce((s,t)=>s+(t.estMin||0),0);
+const remainingOfGoal=g=>S.tasks.filter(t=>t.goalId===g.id && !t.done)
+  .reduce((s,t)=>s+(t.estMin||0),0);
+
+/* ============================================================
+   目標のふりかえり
+   期限が来たら「達成できたか」を一度だけ聞く。
+   点数は聞かない。聞くのは達成できたかどうかだけ。
+
+   そのうえで「やることが終わったか」と組み合わせて読む。
+   この2つの組み合わせが、時間の見積りとは別の計画力を映す。
+   ============================================================ */
+const isClosed=g=>!!(g.result);
+const isDue=g=>!!(g.deadline) && !isClosed(g) && diffDays(today(), g.deadline)<=0;
+const dueGoals=()=>S.goals.filter(isDue)
+  .sort((a,b)=>a.deadline.localeCompare(b.deadline));
+
+function goalProgress(g){
+  const all=S.tasks.filter(t=>t.goalId===g.id);
+  const dn=all.filter(t=>t.done).length;
+  return {n:all.length, done:dn, rate: all.length? dn/all.length : null};
+}
+/* 目標に紐づくタスクの、見積りに対する実際 */
+function goalAccuracy(g){
+  const l=doneTasks().filter(t=>t.goalId===g.id);
+  if(l.length<MIN_SUBJ) return {enough:false, n:l.length};
+  return {enough:true, n:l.length, med:median(ratioList(l))};
+}
+function goalReading(g){
+  if(!isClosed(g)) return null;
+  const p=goalProgress(g);
+  const a=!!g.result.achieved;
+  if(p.rate==null) return {h: a? "達成しました" : "届きませんでした",
+    d:"やることを登録していなかったので、計画については何も言えません。"};
+  const finished=p.rate>=0.8;
+  if(a && finished) return {h:"計画どおりに進んで、達成しました",
+    d:`やること${p.n}件のうち${p.done}件を終えています。この立て方は、あなたに合っていたようです。`};
+  if(a && !finished) return {h:"やることを全部終えなくても、達成できました",
+    d:`やること${p.n}件のうち${p.done}件。目標が少し低かったか、いらないことが混じっていたのかもしれません。次はもう少し高くしてみてもいいかもしれません。`};
+  if(!a && finished) return {h:"やることは終えたのに、届きませんでした",
+    d:`やること${p.n}件のうち${p.done}件を終えています。やった量ではなく、やることの選び方が合っていなかったのかもしれません。`};
+  return {h:"計画が最後まで進みませんでした",
+    d:`やること${p.n}件のうち${p.done}件。まず、立てた計画の量が多すぎなかったかを見てみてください。`};
+}
+
+/* 記録ストリーク：「完了した日」ではなく「記録した日」が続く。
+   できなかった、という記録も含む。サボった日だけが途切れる。 */
+function streakInfo(){
+  const dates=new Set(S.tasks.filter(t=>t.recordedAt).map(t=>t.recordedAt));
+  const td=today();
+  let cur = dates.has(td) ? td : addDays(td,-1);
+  if(!dates.has(cur)) return {n:0, today:dates.has(td), everRecorded:dates.size>0};
+  let n=0;
+  while(dates.has(cur)){ n++; cur=addDays(cur,-1); }
+  return {n, today:dates.has(td), everRecorded:true};
+}
+
+/* 見積りにどれだけ近かったか。これがこのアプリの「うまさ」の定義。 */
+const HIT=0.10, NEAR=0.25, EPS=1e-9;
+function accuracyOf(t){ return Math.abs(t.actMin/t.estMin - 1); }
+/* 33/30 は 1.1000000000000001 になる。境界ちょうどが漏れないよう EPS を足す。 */
+const isHit=t=>accuracyOf(t)<=HIT+EPS;
+function verdictOf(t){
+  const a=accuracyOf(t);
+  if(a<=HIT+EPS)  return {k:"hit",  mark:"🎯", lead:"ぴったり", sub:"見積りどおりでした"};
+  if(a<=NEAR+EPS) return {k:"near", mark:"👍", lead:"おしい",   sub:`ずれは${Math.round(a*100)}%でした`};
+  const over=t.actMin>t.estMin;
+  return {k:"far", mark:over?"🐢":"🐇", lead:over?"思ったより かかった":"思ったより 早かった",
+    sub:`ずれは${Math.round(a*100)}%。これも大事な記録です`};
+}
+
+/* 立て直し：できなかった記録の翌日に、また記録した回数。
+   「計画どおりにできなかった＝失敗ではない」を、遊びの側から支える。 */
+function recoveryCount(){
+  const rec=new Set(S.tasks.filter(t=>t.recordedAt).map(t=>t.recordedAt));
+  const missDays=new Set(S.tasks.filter(t=>t.missReason&&t.recordedAt).map(t=>t.recordedAt));
+  let n=0;
+  missDays.forEach(d=>{ if(rec.has(addDays(d,1))) n++; });
+  return n;
+}
+
+/* 称号：見積りの精度と、立て直しに対してだけ出す。
+   完了数・学習時間・書き直し回数には出さない。
+   （書き直しに称号を出すと、称号ほしさに書き直すようになり、
+     estEdited が指標として意味を失うため。） */
+function badgeInfo(){
+  const l=doneTasks().slice().sort((a,b)=>(a.doneAt||"").localeCompare(b.doneAt||""));
+  const hits=l.filter(isHit).length;
+  const rec=recoveryCount();
+  const out=[];
+
+  if(l.length>=MIN_BADGE){
+    const mid=Math.floor(l.length/2);
+    const devFirst=Math.abs(median(ratioList(l.slice(0,mid)))-1);
+    const devSecond=Math.abs(median(ratioList(l.slice(mid)))-1);
+    const devAll=Math.abs(median(ratioList(l))-1);
+    if(devAll<=0.15) out.push({id:"master", label:"見積り名人", mark:"🏅",
+      detail:`${l.length}件のずれは、真ん中の値で${Math.round(devAll*100)}%です。`});
+    else if(devFirst-devSecond>=0.10) out.push({id:"growing", label:"上達中", mark:"📈",
+      detail:`前半のずれは${Math.round(devFirst*100)}%、後半は${Math.round(devSecond*100)}%。縮まっています。`});
+  }
+  const HT=[[1,"はじめてのぴったり","🎯"],[5,"ぴったり5回","🎯"],[10,"ぴったり10回","🎯"],[25,"ぴったり25回","🎯"]];
+  for(let i=HT.length-1;i>=0;i--){
+    if(hits>=HT[i][0]){ out.push({id:"hit"+HT[i][0], label:HT[i][1], mark:HT[i][2],
+      detail:`見積りとのずれが${Math.round(HIT*100)}%以内だった回数：${hits}回。`}); break; }
+  }
+  const RT=[[1,"立て直した","🌱"],[5,"立て直し5回","🌿"],[10,"立て直し10回","🌳"]];
+  for(let i=RT.length-1;i>=0;i--){
+    if(rec>=RT[i][0]){ out.push({id:"rec"+RT[i][0], label:RT[i][1], mark:RT[i][2],
+      detail:`できなかった次の日に、また記録した回数：${rec}回。`}); break; }
+  }
+  return {list:out, n:l.length, hits, rec, enough:l.length>=MIN_BADGE};
+}
+
+/* ============================================================
+   花だん
+   育つのは「記録した日」。勉強した量や完了数では育たない。
+   ぴったりだった日は、もう1つぶん育つ。
+   種類ごとに咲くまでの日数が違い、咲いたら季節の次のタネが飛んでくる。
+   ============================================================ */
+const PLANTS={
+  sakurasou:{n:"さくらそう", s:"spring", cost:8,  petal:"#E58AAE", core:"#F2D24E", np:5,  rx:6, ry:8},
+  tulip    :{n:"チューリップ",s:"spring", cost:12, petal:"#D9342A", core:"#C9302A", np:3,  rx:7, ry:11},
+  asagao   :{n:"あさがお",   s:"summer", cost:8,  petal:"#6B5BC4", core:"#F7F3E4", np:6,  rx:8, ry:8},
+  himawari :{n:"ひまわり",   s:"summer", cost:16, petal:"#F2B01E", core:"#7A5230", np:14, rx:5, ry:11},
+  cosmos   :{n:"コスモス",   s:"autumn", cost:10, petal:"#E06A9A", core:"#F2D24E", np:8,  rx:5, ry:10},
+  kiku     :{n:"きく",       s:"autumn", cost:14, petal:"#E8B33A", core:"#C98F1E", np:16, rx:3, ry:11},
+  suisen   :{n:"すいせん",   s:"winter", cost:10, petal:"#F7F3E4", core:"#E8B33A", np:6,  rx:6, ry:9},
+  tsubaki  :{n:"つばき",     s:"winter", cost:16, petal:"#C9304A", core:"#F2D24E", np:6,  rx:9, ry:9}
+};
+const SEASON_JA={spring:"春",summer:"夏",autumn:"秋",winter:"冬"};
+const STAGES=["タネ","め","は","つぼみ","花"];
+function seasonOf(ds){
+  const m=Number(ds.slice(5,7));
+  if(m>=3&&m<=5) return "spring";
+  if(m>=6&&m<=8) return "summer";
+  if(m>=9&&m<=11) return "autumn";
+  return "winter";
+}
+function pickSeed(season, exclude){
+  const c=Object.keys(PLANTS).filter(k=>PLANTS[k].s===season && k!==exclude);
+  const pool=c.length? c : Object.keys(PLANTS);
+  return pool[Math.floor(Math.random()*pool.length)];
+}
+/* これまでに積み上がった育ちのぶん。日単位で数えるので、
+   1日にたくさん記録しても稼げない。 */
+function lifetimeGrowth(){
+  const rec=new Set(S.tasks.filter(t=>t.recordedAt).map(t=>t.recordedAt));
+  const hit=new Set(doneTasks().filter(isHit).map(t=>t.doneAt).filter(Boolean));
+  let p=0;
+  rec.forEach(d=>{ p+=1; if(hit.has(d)) p+=1; });
+  return p;
+}
+/* 咲いた花を確定させ、新しいタネを置く。咲いた花の一覧を返す。 */
+function advanceGarden(){
+  if(!S.garden) S.garden={current:null, bloomed:[]};
+  if(!S.garden.current)
+    S.garden.current={id:pickSeed(seasonOf(today())), plantedAt:today(), base:lifetimeGrowth()};
+  const newly=[];
+  let guard=0;
+  while(guard++<20){
+    const c=S.garden.current, pl=PLANTS[c.id];
+    if(!pl){ S.garden.current=null; break; }
+    if(lifetimeGrowth()-c.base < pl.cost) break;
+    S.garden.bloomed.push({id:c.id, at:today()});
+    newly.push(c.id);
+    S.garden.current={id:pickSeed(seasonOf(today()), c.id), plantedAt:today(), base:c.base+pl.cost};
+  }
+  return newly;
+}
+function gardenState(){
+  if(!S.garden||!S.garden.current) return null;
+  const c=S.garden.current, pl=PLANTS[c.id];
+  if(!pl) return null;
+  const pts=Math.max(0, lifetimeGrowth()-c.base);
+  const ratio=Math.min(1, pts/pl.cost);
+  const stage=ratio>=1?4 : ratio>=.72?3 : ratio>=.42?2 : ratio>0?1 : 0;
+  return {plant:pl, id:c.id, pts, need:pl.cost, ratio, stage, bloomed:S.garden.bloomed||[]};
+}
+/* 依存ゼロで描く。段階に応じて茎が伸び、最後に花が咲く。 */
+function plantSVG(id, stage, size){
+  const pl=PLANTS[id]; size=size||86;
+  const W=72,H=104, soil=90, cx=36;
+  const h=[0,16,38,58,68][stage];
+  const top=soil-h;
+  let s=`<svg width="${size}" height="${Math.round(size*H/W)}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${pl.n}">
+    <ellipse cx="${cx}" cy="${soil+6}" rx="26" ry="7" fill="#C9B896"/>`;
+  if(stage===0){
+    s+=`<ellipse cx="${cx}" cy="${soil}" rx="5" ry="4" fill="#8A6E4B"/>`;
+  }else{
+    s+=`<path d="M${cx} ${soil} Q${cx-3} ${top+12} ${cx} ${top}" stroke="#5C9A5C" stroke-width="3.2" fill="none" stroke-linecap="round"/>`;
+    if(stage>=1) s+=`<ellipse cx="${cx-9}" cy="${soil-h*0.42}" rx="9" ry="4.6" fill="#6EAE68" transform="rotate(-18 ${cx-9} ${soil-h*0.42})"/>`;
+    if(stage>=2) s+=`<ellipse cx="${cx+10}" cy="${soil-h*0.66}" rx="10" ry="5" fill="#5C9A5C" transform="rotate(20 ${cx+10} ${soil-h*0.66})"/>`;
+    if(stage===3) s+=`<ellipse cx="${cx}" cy="${top-4}" rx="6" ry="9" fill="${pl.petal}" opacity=".8"/>
+      <path d="M${cx-6} ${top-1} Q${cx} ${top-12} ${cx+6} ${top-1}" stroke="#5C9A5C" stroke-width="2.4" fill="none"/>`;
+    if(stage>=4){
+      const fy=top-7;
+      for(let i=0;i<pl.np;i++){
+        const a=(360/pl.np)*i;
+        s+=`<ellipse cx="${cx}" cy="${fy-pl.ry*0.85}" rx="${pl.rx}" ry="${pl.ry}" fill="${pl.petal}"
+             transform="rotate(${a} ${cx} ${fy})"/>`;
+      }
+      s+=`<circle cx="${cx}" cy="${fy}" r="${pl.np>10?7:5.5}" fill="${pl.core}"/>`;
+    }
+  }
+  return s+`</svg>`;
+}
+/* 今日ぶんの育ち。0＝まだ、1＝記録した、2＝ぴったりもあった。
+   1日にいくつ記録しても、ここは2で頭打ちになる。 */
+function todayGrowth(){
+  const td=today();
+  const rec=S.tasks.some(t=>t.recordedAt===td);
+  if(!rec) return 0;
+  return doneTasks().some(t=>t.doneAt===td && isHit(t))? 2 : 1;
+}
+function gardenCard(){
+  const g=gardenState();
+  if(!g) return "";
+  const done=g.stage>=4;
+  const tg=todayGrowth();
+  const left=Math.max(0,g.need-g.pts);
+  return `<div class="garden">${plantSVG(g.id,g.stage,78)}
+    <div class="gtxt">
+      <div class="gname">${g.plant.n}<span style="font-weight:400;color:var(--ink-faint);font-size:11px">　${SEASON_JA[g.plant.s]}の花</span></div>
+      <div class="gstage">${done? "咲きました"
+        : tg? `今日のぶん、育ちました（+${tg}）・咲くまであと${left}`
+            : `${STAGES[g.stage]}・今日まだ記録していません`}</div>
+      <div class="gmeter"><i style="width:${Math.round(g.ratio*100)}%"></i></div>
+      <div class="gstage" style="color:var(--ink-faint);font-size:10.5px;margin-top:3px">
+        育つのは1日に1回まで（ぴったりの日は2）</div>
+    </div></div>`;
+}
+
+/* ============================================================
+   5. 助言
+   過去の記録と、登録された使える時間だけを根拠にする。
+
+   記録が3件そろうまでは「真ん中の値」を出さない。
+   ただし、1〜2件しかなくても、その1件は事実として見せる。
+   （「まだ言えません」と黙るより、「前回はこうでした」と
+     見せるほうが、正直でも役にも立つ。）
+   ============================================================ */
+/* 助言の種類を2つに分ける。
+   EST  … 書いた数字そのものについての指摘。直す先は「見積り」。
+   PLAN … 置き場所についての指摘。直す先は「日付」か「量」。
+   中心指標（助言を見て見積りを直したか）は EST だけで数える。
+   PLAN を混ぜると、日付を動かして解決した生徒が
+   「助言を無視した」に数えられてしまうため。 */
+const EST_KINDS=["ratio","last","long"], PLAN_KINDS=["day","goal"];
+const estWarnOf =adv=>adv.some(a=>a.warn && EST_KINDS.includes(a.k));
+const planWarnOf=adv=>adv.some(a=>a.warn && PLAN_KINDS.includes(a.k));
+
+function recentOf(sub){
+  const l=doneTasks().filter(t=>subjectOf(t)===sub);
+  return l.sort((a,b)=>(b.doneAt||"").localeCompare(a.doneAt||""));
+}
+function advise(d){ // {subject, estMin, planDate, goalId, taskId}
+  const out=[];
+
+  // 見積りに対して実際はどうだったか
+  const ss=subjectStats(d.subject);
+  const os=overallStats();
+  const use = ss.enough? {med:ss.med, n:ss.n, label:d.subject}
+            : (os.enough? {med:os.med, n:os.n, label:"ぜんぶの教科"} : null);
+  if(use){
+    const pct=Math.round((use.med-1)*100);
+    if(Math.abs(pct)>=15){
+      const pred=Math.round(d.estMin*use.med/5)*5;
+      out.push({k:"ratio", warn:pct>0, suggest:pred,
+        h:`${use.label}は、見積りより${pct>0?"長く":"短く"}かかることが多いです`,
+        d:`これまで${use.n}回の記録で、実際にかかった時間は見積りの${Math.round(use.med*100)}%（真ん中の値）。${d.estMin}分なら、${pred}分くらいになるかもしれません。`});
+    }else{
+      out.push({k:"ratio", flat:true,
+        h:`${use.label}の見積りは、だいたい合っています`,
+        d:`これまで${use.n}回の記録で、ずれは${Math.abs(pct)}%くらいです。`});
+    }
+  }else{
+    // 3件に届かないときは、持っている記録をそのまま見せる
+    const near = recentOf(d.subject);
+    const any  = near.length? near : doneTasks().slice().sort((a,b)=>(b.doneAt||"").localeCompare(a.doneAt||""));
+    if(any.length){
+      const r=any[0], ratio=r.actMin/r.estMin;
+      const same = near.length>0;
+      const pred=Math.round(d.estMin*ratio/5)*5;
+      out.push({k:"last", warn:ratio>1.15, suggest:ratio>1.15?pred:null,
+        h:`${same?d.subject:"前"}にやった「${r.title}」は、${mins(r.estMin)}の見積りで ${mins(r.actMin)}かかりました`,
+        d:`まだ記録は${any.length}件なので、これがいつもそうだとは限りません。${
+          ratio>1.15? `おなじだけずれるなら、今回は${pred}分くらいです。` : "ずれは小さめでした。"}`});
+    }
+  }
+
+  // 長い予定
+  const ls=lengthStats(60);
+  if(ls.enough && d.estMin>=ls.cut && ls.long!=null && ls.short!=null && ls.short-ls.long>=0.2){
+    out.push({k:"long", warn:true,
+      h:`${ls.cut}分以上の予定は、終わらないことが多いです`,
+      d:`${ls.cut}分以上は${ls.nLong}件中${Math.round(ls.long*100)}%、${ls.cut}分未満は${ls.nShort}件中${Math.round(ls.short*100)}%が終わっています。2回に分けると終わりやすいかもしれません。`});
+  }
+
+  // その日の合計
+  if(d.planDate){
+    const other=plannedOn(d.planDate, d.taskId);
+    const total=other+d.estMin;
+    const cap=dayCapacity(d.planDate);
+    if(total>cap){
+      out.push({k:"day", warn:true,
+        h:`${fmt(d.planDate)}は、入れすぎかもしれません`,
+        d:`この日の予定は合計${mins(total)}。使えると登録した時間は${mins(cap)}です。${mins(total-cap)}はみ出しています。`});
+    }
+  }
+
+  // 期限までに間に合うか
+  if(d.goalId){
+    const g=S.goals.find(x=>x.id===d.goalId);
+    if(g && g.deadline && !isClosed(g) && diffDays(today(),g.deadline)>=0){
+      const rest=remainingOfGoal(g) + (d.taskId? 0 : d.estMin);
+      const cap=capacityBetween(addDays(today(),-1), g.deadline);
+      if(rest>cap){
+        out.push({k:"goal", warn:true,
+          h:`${g.title}は、期限までに終わらない量です`,
+          d:`残りの予定は合計${mins(rest)}。今日から${fmt(g.deadline)}までに使える時間は${mins(cap)}です。減らすか、期限を延ばすか、使える時間を見直してください。`});
+      }
+    }
+  }
+  return out;
+}
+
+/* ============================================================
+   パスコード
+
+   端末の中だけの、簡単な目隠し。
+   記録は暗号化されないので、端末そのものを守るものではない。
+   人に画面を見られたくない、という程度の目的に使う。
+
+   Web Crypto が使えない場所（file:// で開いたときなど）では
+   簡単な計算に落ちるため、その旨を設定画面に出す。
+   ============================================================ */
+let unlocked=false;
+const PIN_LEN=4;
+function randSalt(){
+  const a=new Uint8Array(12);
+  if(window.crypto && crypto.getRandomValues) crypto.getRandomValues(a);
+  else for(let i=0;i<a.length;i++) a[i]=Math.floor(Math.random()*256);
+  return [...a].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+const hex=buf=>[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
+async function hashPin(pin,salt){
+  const enc=new TextEncoder();
+  if(window.crypto && crypto.subtle && crypto.subtle.importKey){
+    try{
+      const key=await crypto.subtle.importKey("raw",enc.encode(pin),"PBKDF2",false,["deriveBits"]);
+      const bits=await crypto.subtle.deriveBits(
+        {name:"PBKDF2", salt:enc.encode(salt), iterations:150000, hash:"SHA-256"}, key, 256);
+      return {algo:"pbkdf2", h:hex(bits)};
+    }catch(e){ /* 使えない場所なので下へ */ }
+  }
+  let a=5381>>>0, b=52711>>>0;
+  const str=salt+"|"+pin;
+  for(let i=0;i<str.length;i++){ const c=str.charCodeAt(i);
+    a=(((a*33)>>>0)^c)>>>0; b=(((b*65599)>>>0)+c)>>>0; }
+  for(let i=0;i<30000;i++){ a=((a*33)^(b>>>7))>>>0; b=((b*65599)^(a>>>11))>>>0; }
+  return {algo:"weak", h:a.toString(16).padStart(8,"0")+b.toString(16).padStart(8,"0")};
+}
+const hasPin=()=>!!(S && S.settings && S.settings.pin && S.settings.pin.h);
+function lockLeft(){
+  const u=S.settings.pinUntil;
+  if(!u) return 0;
+  return Math.max(0, Math.ceil((u-Date.now())/1000));
+}
+/* まちがえた回数に応じて、少しずつ待ち時間を伸ばす */
+function lockPenalty(n){
+  if(n>=10) return 5*60*1000;
+  if(n>=5)  return 60*1000;
+  return 0;
+}
+
+/* ============================================================
+   6. 画面の道具
+   ============================================================ */
+const V=document.getElementById("view");
+const TABS=document.getElementById("tabs");
+const MODAL=document.getElementById("modal");
+const TOAST=document.getElementById("toast");
+const $=s=>V.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function toast(m){ TOAST.textContent=m; TOAST.classList.add("on");
+  clearTimeout(toast._t); toast._t=setTimeout(()=>TOAST.classList.remove("on"),1900); }
+
+/* confirm() は端末によって出ないことがあるため使わない */
+function ask(title,{body="",okLabel="はい",cancelLabel="やめる",danger=false}={}){
+  return new Promise(res=>{
+    MODAL.innerHTML=`<div class="box"><h2>${esc(title)}</h2>${body?`<p>${esc(body)}</p>`:""}
+      <button class="btn" id="mk" style="${danger?"background:var(--red)":""}">${esc(okLabel)}</button>
+      <button class="btn ghost" id="mc">${esc(cancelLabel)}</button></div>`;
+    MODAL.classList.remove("hidden");
+    const close=v=>{ MODAL.classList.add("hidden"); MODAL.innerHTML=""; res(v); };
+    MODAL.querySelector("#mk").onclick=()=>close(true);
+    MODAL.querySelector("#mc").onclick=()=>close(false);
+    MODAL.onclick=e=>{ if(e.target===MODAL) close(false); };
+  });
+}
+function go(r,c){ route=r; ctx=c||{}; window.scrollTo(0,0); render(); }
+
+function render(){
+  try{ draw(); }
+  catch(err){
+    console.error(err);
+    V.innerHTML=`<div class="vhead"><h1 class="t">画面を出せませんでした</h1>
+      <p class="sub">記録は消えていません。</p></div>
+      <div class="note">${esc((err&&err.message)||String(err))}</div>
+      <button class="btn ghost" id="rl">開き直す</button>`;
+    const b=V.querySelector("#rl"); if(b) b.onclick=()=>location.reload();
+  }
+}
+function draw(){
+  if(!S.student){ TABS.classList.add("hide"); return viewSetup(); }
+  if(hasPin() && !unlocked){ TABS.classList.add("hide"); return viewLock(); }
+  TABS.classList.remove("hide");
+  const GROUP={today:"today",done:"today",result:"today",applymove:"today",
+    goals:"goals",goaladd:"goals",goal:"goals",goalclose:"goals",
+    taskadd:"goals",taskest:"goals",pickdate:"goals",
+    review:"review",set:"set",sheet:"set",pin:"set"};
+  const g=GROUP[route]||"today";
+  TABS.innerHTML=[["today","今日"],["goals","目標"],["review","ふりかえり"],["set","設定"]]
+    .map(([k,l])=>`<button data-tab="${k}" class="${g===k?"on":""}">${l}</button>`).join("");
+  ({today:viewToday,done:viewDone,result:viewResult,applymove:viewApplyMove,
+    goals:viewGoals,goaladd:viewGoalAdd,goal:viewGoal,goalclose:viewGoalClose,
+    taskadd:viewTaskAdd,taskest:viewTaskEst,pickdate:viewPickDate,
+    review:viewReview,set:viewSet,sheet:viewSheet,pin:viewPin}[route]||viewToday)();
+}
+TABS.addEventListener("click",e=>{
+  const b=e.target.closest("[data-tab]"); if(b) go(b.dataset.tab);
+});
+
+/* 見積りと実績を並べて見せる。このアプリの中心。 */
+function gauge(est,act){
+  const max=Math.max(est,act||0)||1;
+  const over=act!=null && act>est;
+  const pct=n=>Math.max(2,Math.round((n/max)*100));
+  return `<div class="gauge">
+    <div class="gbar"><i class="est" style="width:${pct(est)}%" data-w="${pct(est)}%"></i></div>
+    <div class="glab"><span>見積り</span><span class="gnum">${mins(est)}</span></div>
+    ${act!=null?`<div class="gbar${over?" over":""}" style="margin-top:6px">
+      <i class="act" style="width:${pct(act)}%" data-w="${pct(act)}%"></i></div>
+    <div class="glab"><span>実際</span><span class="gnum">${mins(act)}　
+      ${act===est?"ぴったり":(over?"+":"−")+mins(Math.abs(act-est))}</span></div>`:""}
+  </div>`;
+}
+
+/* ============================================================
+   7. 画面
+   ============================================================ */
+function viewSetup(){
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">はじめに</p><h1 class="t">使う人と、使える時間</h1>
+  <p class="sub">名前はこの端末の中だけで使います。</p></div>
+  <div class="field"><label>名前</label><input id="nm" type="text" placeholder="ゆうた" autocomplete="off"></div>
+  <div class="field"><label>学年</label>
+    <div class="chips" id="gr">${["中1","中2","中3","高1","高2","高3"].map((g,i)=>
+      `<button class="chip${i===1?" on":""}" data-g="${g}">${g}</button>`).join("")}</div></div>
+  <p class="sec">1日に勉強に使える時間</p>
+  <div class="field"><label>平日（月〜金）</label><input id="wd" type="number" inputmode="numeric" value="60"> </div>
+  <div class="field"><label>休日（土日）</label><input id="we" type="number" inputmode="numeric" value="120"></div>
+  <div class="hint">分で入れてください。あとから直せます。ここに部活や塾の時間は入れません。</div>
+  <div class="note"><b>アカウントは作りません。</b>メールアドレスもパスワードも登録不要。
+  記録はこの端末の中にだけ保存され、外に送信されません。AIも使いません。</div>
+  <button class="btn" id="go">はじめる</button>`;
+  let grade="中2";
+  $("#gr").addEventListener("click",e=>{
+    const b=e.target.closest("[data-g]"); if(!b) return;
+    V.querySelectorAll("#gr .chip").forEach(c=>c.classList.remove("on"));
+    b.classList.add("on"); grade=b.dataset.g;
+  });
+  $("#go").onclick=async()=>{
+    const name=$("#nm").value.trim();
+    if(!name) return toast("名前を入れてください");
+    const wd=parseInt($("#wd").value,10), we=parseInt($("#we").value,10);
+    if(!(wd>0)||!(we>0)) return toast("使える時間を入れてください");
+    S.student={name,grade};
+    S.settings.weekdayMin=wd; S.settings.weekendMin=we;
+    advanceGarden();
+    await saveNow(); go("today");
+  };
+}
+
+/* ---------- 今日 ---------- */
+function viewToday(){
+  const td=today();
+  const list=S.tasks.filter(t=>t.planDate===td).sort((a,b)=>(a.done?1:0)-(b.done?1:0));
+  const late=S.tasks.filter(t=>!t.done && !t.missReason && t.planDate && t.planDate<td)
+    .sort((a,b)=>a.planDate.localeCompare(b.planDate));
+  const total=list.filter(t=>!t.done).reduce((s,t)=>s+t.estMin,0);
+  const cap=dayCapacity(td);
+  const st=streakInfo();
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">${fmt(td,true)}</p><h1 class="t">今日</h1>
+  <p class="sub">${list.length? `残り${list.filter(t=>!t.done).length}件・${mins(total)}／使える時間 ${mins(cap)}`
+    : "予定はありません"}</p></div>
+  ${gardenCard()}
+  ${(()=>{const due=dueGoals(); if(!due.length) return "";
+    const g=due[0];
+    return `<div class="advice warn"><div class="h">「${esc(g.title)}」の期限になりました</div>
+      <div class="d">${due.length>1?`ほかに${due.length-1}件あります。`:""}</div>
+      <button class="chip" data-close="${g.id}" style="margin-top:8px">結果を書く</button></div>`;})()}
+  ${st.n>0?`<div class="streak"><span class="fire">🔥</span><div>
+    <b>${st.n}日つづいています</b>
+    <span>${st.today? "今日も記録しました" : "できた・できなかったにかかわらず、今日もひとつ記録すると続きます"}</span>
+    </div></div>` : (st.everRecorded?`<div class="streak"><span class="fire">🌱</span><div>
+    <b>また今日から</b><span>記録すると、ここから続いていきます</span></div></div>`:"")}
+  ${total>cap?`<div class="advice warn"><div class="h">今日は${mins(total-cap)}はみ出しています</div>
+    <div class="d">どれかを別の日に動かすか、時間を減らすことを考えてみてください。</div></div>`:""}
+  <div id="list">${list.length? list.map(taskRow).join("") : `<div class="empty">目標から、やることを足してください</div>`}</div>
+  ${late.length?`<p class="sec">日をすぎたもの</p>${late.map(taskRow).join("")}`:""}
+  <button class="btn ghost" data-act="goals">目標を見る</button>`;
+  V.onclick=async e=>{
+    const gc=e.target.closest("[data-close]");
+    if(gc){ return go("goalclose",{id:gc.dataset.close}); }
+    const c=e.target.closest("[data-done]");
+    if(c){ return go("done",{id:c.dataset.done}); }
+    if(e.target.closest('[data-act="goals"]')) go("goals");
+  };
+}
+function taskRow(t){
+  const g=goalOf(t);
+  const late=!t.done && t.planDate && t.planDate<today();
+  return `<div class="item">
+    <button class="cbx ${t.done?"on":""}" data-done="${t.id}" aria-label="記録する"></button>
+    <div class="body"><div class="tt ${t.done?"done":""}">${esc(t.title)}
+      ${late?'<span class="tag late">'+relDay(t.planDate)+'</span>':""}</div>
+      <div class="mm">${g?esc(g.subject)+"・":""}見積り ${mins(t.estMin)}${
+        t.done&&t.actMin!=null? "　→　実際 "+mins(t.actMin) : ""}${
+        t.missReason? "　→　"+esc(MISS[t.missReason]) : ""}</div>
+    </div></div>`;
+}
+
+/* ---------- 実行の記録 ---------- */
+function viewDone(){
+  const t=S.tasks.find(x=>x.id===ctx.id);
+  if(!t) return go("today");
+  if(t.done||t.missReason){ // 取り消し
+    V.innerHTML=`<div class="vhead"><h1 class="t">${esc(t.title)}</h1>
+      <p class="sub">記録ずみ</p></div>
+      ${t.done? gauge(t.estMin,t.actMin) : `<div class="note">${esc(MISS[t.missReason])}</div>`}
+      ${t.missReason?`<button class="btn ghost" id="move2">べつの日にやり直す</button>`:""}
+      <button class="btn ghost" id="undo">記録を取り消す</button>
+      <button class="btn quiet" id="back">戻る</button>`;
+    if($("#move2")) $("#move2").onclick=async()=>{
+      t.missReason=null; t.recordedAt=null; await saveNow();
+      go("pickdate",{mode:"move", draft:{date:t.planDate||today()},
+        taskId:t.id, returnRoute:"applymove"});
+    };
+    $("#undo").onclick=async()=>{
+      t.done=false; t.doneAt=null; t.actMin=null; t.missReason=null; t.recordedAt=null;
+      await saveNow(); go("today");
+    };
+    $("#back").onclick=()=>go("today");
+    return;
+  }
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">記録する</p><h1 class="t">${esc(t.title)}</h1>
+  <p class="sub">見積りは ${mins(t.estMin)} でした</p></div>
+  <div class="field"><label>実際にかかった時間（分）</label>
+    <input id="am" type="number" inputmode="numeric" placeholder="${t.estMin}"></div>
+  <div class="chips" id="q">${[10,15,20,30,45,60,90].map(n=>
+    `<button class="chip" data-m="${n}">${n}分</button>`).join("")}</div>
+  <button class="btn" id="ok">やった</button>
+  <p class="sec">できなかったとき</p>
+  <div class="chips" id="ms">${Object.entries(MISS).map(([k,v])=>
+    `<button class="chip" data-ms="${k}">${v}</button>`).join("")}</div>
+  <div class="note">できなかったことは、失敗ではありません。<b>どれくらいずれたか</b>が、次の見積りの材料になります。</div>
+  <button class="btn ghost" id="move">べつの日にする</button>
+  <button class="btn quiet" id="back">戻る</button>`;
+  $("#q").onclick=e=>{ const b=e.target.closest("[data-m]"); if(b) $("#am").value=b.dataset.m; };
+  $("#ok").onclick=async()=>{
+    const m=parseInt($("#am").value,10);
+    if(!(m>0)) return toast("かかった時間を入れてください");
+    const before=badgeInfo().list.map(x=>x.id);
+    const growBefore=lifetimeGrowth();
+    t.done=true; t.doneAt=today(); t.actMin=m; t.missReason=null; t.recordedAt=today();
+    const grew=lifetimeGrowth()-growBefore;
+    const bloomed=advanceGarden();
+    await saveNow();
+    const gained=badgeInfo().list.filter(x=>!before.includes(x.id));
+    go("result",{id:t.id, gained, bloomed, grew});
+  };
+  $("#ms").onclick=async e=>{
+    const b=e.target.closest("[data-ms]"); if(!b) return;
+    const before=badgeInfo().list.map(x=>x.id);
+    const growBefore=lifetimeGrowth();
+    t.missReason=b.dataset.ms; t.done=false; t.actMin=null; t.recordedAt=today();
+    const grew=lifetimeGrowth()-growBefore;
+    const bloomed=advanceGarden();
+    await saveNow();
+    const gained=badgeInfo().list.filter(x=>!before.includes(x.id));
+    go("result",{id:t.id, gained, bloomed, grew});
+  };
+  $("#move").onclick=()=>go("pickdate",{mode:"move", draft:{date:t.planDate||today()},
+    taskId:t.id, returnRoute:"applymove"});
+  $("#back").onclick=()=>go("today");
+}
+/* ---------- 予定日を動かす ---------- */
+async function viewApplyMove(){
+  const t=S.tasks.find(x=>x.id===ctx.taskId);
+  if(!t) return go("today");
+  const nd=(ctx.draft||{}).date;
+  if(nd && nd!==t.planDate){ t.planDate=nd; await saveNow(); toast(`${fmt(nd)}に動かしました`); }
+  go("today");
+}
+
+function viewResult(){
+  const t=S.tasks.find(x=>x.id===ctx.id);
+  if(!t) return go("today");
+  const st=streakInfo();
+  const gained=ctx.gained||[];
+  const missed=!!t.missReason;
+  const vd=missed? null : verdictOf(t);
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">記録しました</p><h1 class="t">${esc(t.title)}</h1></div>
+  ${missed? `<div class="verdict"><span class="mark">📝</span>
+      <div class="lead">記録できました</div>
+      <div class="sub2">${esc(MISS[t.missReason])}</div></div>
+    <div class="note">できなかったことも、ちゃんとした記録です。<b>次の見積りの材料になります。</b></div>`
+  : `<div class="verdict"><span class="mark">${vd.mark}</span>
+      <div class="lead">${vd.lead}</div><div class="sub2">${esc(vd.sub)}</div></div>
+     <div class="reveal">${gauge(t.estMin,t.actMin)}</div>`}
+  ${st.n>0?`<div class="streak" style="margin-top:14px"><span class="fire">🔥</span><div>
+    <b>${st.n}日つづいています</b><span>${st.n===1?"ここから続いていきます":"記録した日が続いています"}</span>
+    </div></div>`:""}
+  ${gained.length? `<p class="sec">称号をもらいました</p>${gained.map(b=>
+    `<div class="badge newbadge"><div class="h">${b.mark} ${esc(b.label)}</div>
+     <div class="d">${esc(b.detail)}</div></div>`).join("")}`:""}
+  ${(ctx.bloomed||[]).length? `<p class="sec">花が咲きました</p>${(ctx.bloomed).map(id=>
+    `<div class="badge newbadge" style="text-align:center">${plantSVG(id,4,84)}
+     <div class="h">${esc(PLANTS[id]?PLANTS[id].n:"")}が 咲きました</div>
+     <div class="d">つぎのタネが飛んできました。</div></div>`).join("")}`
+   : `<p class="sec">花だん</p>
+      <div class="advice flat"><div class="h">${
+        ctx.grew===2? "ぴったりだったので、2つぶん育ちました"
+      : ctx.grew===1? "1つぶん育ちました"
+      : "今日のぶんは、もう育っています"}</div>
+      <div class="d">${ctx.grew>0
+        ? "花は1日に1回育ちます。ぴったりの日は2つぶんです。"
+        : "花が育つのは1日に1回までです。今日はもう育ったので、この記録では変わりません。つづきは明日。"}</div></div>
+      ${gardenCard()}`}
+  <button class="btn" id="next">つづける</button>`;
+  // 幅を後から入れて、伸びるところを見せる
+  requestAnimationFrame(()=>{
+    V.querySelectorAll(".reveal .gbar i").forEach(i=>{ i.style.width=i.dataset.w; });
+  });
+  $("#next").onclick=()=>go("today");
+}
+
+/* ---------- 目標 ---------- */
+function viewGoals(){
+  const rank=g=>isClosed(g)?2:(isDue(g)?0:1);
+  const gs=S.goals.slice().sort((a,b)=>
+    rank(a)-rank(b) || (a.deadline||"9999").localeCompare(b.deadline||"9999"));
+  const open=gs.filter(g=>!isClosed(g)).length;
+  V.innerHTML=`
+  <div class="vhead"><h1 class="t">目標</h1><p class="sub">${gs.length?`進行中 ${open}件・ふりかえりずみ ${gs.length-open}件`:""}</p></div>
+  ${gs.length? gs.map(g=>{
+    const all=S.tasks.filter(t=>t.goalId===g.id);
+    const dn=all.filter(t=>t.done).length;
+    const dl=g.deadline? diffDays(today(),g.deadline) : null;
+    const prog=all.length? Math.round(dn/all.length*100) : 0;
+    const soon = dl!=null && dl<=3;
+    const closed=isClosed(g);
+    return `<button class="goalcard${closed?" closed":""}" data-g="${g.id}">
+      <div class="gt">${esc(g.title)}</div>
+      <div class="gmeta">
+        <span class="pill sub">${esc(g.subject)}</span>
+        ${closed
+          ? `<span class="pill ${g.result.achieved?"ok":"ng"}">${g.result.achieved?"達成した":"届かなかった"}</span>`
+          : (g.deadline?`<span class="pill${soon?" soon":""}">${isDue(g)?"期限：ふりかえろう":relDay(g.deadline)}・${fmt(g.deadline)}</span>`:"")}
+        <span class="pill">${all.length?`${dn} / ${all.length} おわり`:"やること なし"}</span>
+      </div>
+      ${all.length?`<div class="goalbar"><i style="width:${prog}%"></i></div>`:""}
+    </button>`;
+  }).join("") : `<div class="empty">まず、目標をひとつ決めてください</div>`}
+  <button class="btn" id="add">＋ 目標を作る</button>`;
+  V.onclick=e=>{
+    const b=e.target.closest("[data-g]"); if(b) return go("goal",{id:b.dataset.g});
+    if(e.target.closest("#add")) go("goaladd");
+  };
+}
+/* ---------- 目標のふりかえり ---------- */
+function viewGoalClose(){
+  const g=S.goals.find(x=>x.id===ctx.id);
+  if(!g) return go("goals");
+  const p=goalProgress(g);
+  if(isClosed(g)){
+    const rd=goalReading(g);
+    const acc=goalAccuracy(g);
+    V.innerHTML=`
+    <div class="vhead"><p class="eyebrow">ふりかえりずみ・${g.deadline?fmt(g.deadline):""}</p>
+    <h1 class="t" style="font-size:25px;line-height:1.3">${esc(g.title)}</h1>
+    <p class="sub">${g.result.achieved? "達成した" : "届かなかった"}${
+      g.result.note? "　"+esc(g.result.note) : ""}</p></div>
+    <div class="advice${g.result.achieved?"":" flat"}">
+      <div class="h">${esc(rd.h)}</div><div class="d">${esc(rd.d)}</div></div>
+    ${acc.enough?`<div class="card" style="margin-top:12px">
+      <div class="stat"><span>この目標での見積り</span><b>実際は${Math.round(acc.med*100)}%</b></div>
+      <div class="stat"><span>もとにした記録</span><b>${acc.n}件</b></div></div>
+      <div class="hint">100%なら見積りどおり。次の目標を立てるときの目安になります。</div>`:""}
+    <button class="btn ghost" id="undo">ふりかえりを取り消す</button>
+    <button class="btn quiet" id="back">戻る</button>`;
+    $("#undo").onclick=async()=>{
+      if(await ask("ふりかえりを取り消しますか",{okLabel:"取り消す"})){
+        delete g.result; await saveNow(); go("goal",{id:g.id});
+      }
+    };
+    $("#back").onclick=()=>go("goal",{id:g.id});
+    return;
+  }
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">期限：${g.deadline?fmt(g.deadline,true):"—"}</p>
+  <h1 class="t" style="font-size:25px;line-height:1.3">${esc(g.title)}</h1>
+  <p class="sub">どうだった？</p></div>
+  <div class="card">
+    <div class="stat"><span>やること</span><b>${p.n?`${p.done} / ${p.n} おわり`:"登録なし"}</b></div>
+    ${g.now?`<div class="stat"><span>はじめの状態</span><b style="font-size:13px">${esc(g.now)}</b></div>`:""}
+  </div>
+  <div class="field" style="margin-top:16px"><label>備考（任意）</label>
+    <input id="nt" type="text" placeholder="72点だった。関数はまだ苦手" autocomplete="off"></div>
+  <div class="hint">実際にどこまでできたかは、ここに書いておけます。</div>
+  <p class="sec">結果</p>
+  <button class="btn" id="ok">達成した</button>
+  <button class="btn ghost" id="ng">届かなかった</button>
+  <div class="note">点数で評価はしません。<b>達成できたかどうか</b>と、<b>計画がどこまで進んだか</b>を
+  組み合わせて見ることで、次の目標の立て方が分かります。</div>
+  <button class="btn quiet" id="later">あとにする</button>`;
+  const close=async achieved=>{
+    g.result={achieved, note:$("#nt").value.trim(), at:today()};
+    await saveNow(); go("goalclose",{id:g.id});
+  };
+  $("#ok").onclick=()=>close(true);
+  $("#ng").onclick=()=>close(false);
+  $("#later").onclick=()=>go("today");
+}
+
+function viewGoalAdd(){
+  const d=Object.assign({title:"",subject:"数学",now:"",deadline:addDays(today(),14)}, ctx.draft||{});
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">新しい目標</p><h1 class="t">何を達成したい？</h1>
+  <p class="sub">3つだけ答えてください。</p></div>
+  <div class="field"><label>目標</label><input id="ti" type="text"
+    placeholder="数学のテストで80点" autocomplete="off" value="${esc(d.title)}"></div>
+  <div class="field"><label>教科</label>
+    <div class="chips" id="sb">${SUBJECTS.map(x=>
+      `<button class="chip${x===d.subject?" on":""}" data-s="${x}">${x}</button>`).join("")}</div></div>
+  <div class="field"><label>期限</label>
+    <button type="button" id="dateBtn" style="text-align:left;width:100%;padding:4px 0;font-size:16px">${fmt(d.deadline,true)}</button></div>
+  <div class="field"><label>今の状態（任意）</label><input id="nw" type="text"
+    placeholder="60点くらい。関数が苦手" autocomplete="off" value="${esc(d.now)}"></div>
+  <button class="btn" id="ok">作る</button>
+  <button class="btn quiet" id="back">やめる</button>`;
+  let sub=d.subject;
+  $("#sb").onclick=e=>{
+    const b=e.target.closest("[data-s]"); if(!b) return;
+    V.querySelectorAll("#sb .chip").forEach(c=>c.classList.remove("on"));
+    b.classList.add("on"); sub=b.dataset.s;
+  };
+  $("#dateBtn").onclick=()=>go("pickdate",{mode:"goal",
+    draft:{title:$("#ti").value, subject:sub, now:$("#nw").value, deadline:d.deadline},
+    returnRoute:"goaladd"});
+  $("#ok").onclick=async()=>{
+    const title=$("#ti").value.trim();
+    if(!title) return toast("目標を入れてください");
+    const id=uid();
+    S.goals.push({id,title,subject:sub,deadline:d.deadline||null,
+      now:$("#nw").value.trim(),createdAt:today()});
+    await saveNow(); go("goal",{id});
+  };
+  $("#back").onclick=()=>go("goals");
+}
+function viewGoal(){
+  const g=S.goals.find(x=>x.id===ctx.id);
+  if(!g) return go("goals");
+  const all=S.tasks.filter(t=>t.goalId===g.id)
+    .sort((a,b)=>(a.planDate||"9999").localeCompare(b.planDate||"9999"));
+  const rest=remainingOfGoal(g);
+  const closed=isClosed(g);
+  const cap=(!closed && g.deadline)? capacityBetween(addDays(today(),-1),g.deadline) : null;
+  const rd=goalReading(g);
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">${esc(g.subject)}${g.deadline?"・"+fmt(g.deadline)+(closed?"":"まで"):""}</p>
+  <h1 class="t" style="font-size:27px;line-height:1.3">${esc(g.title)}</h1>
+  <p class="sub">${g.now?esc(g.now):"やることを分けて、時間を見積もります"}</p></div>
+  ${closed? `<div class="advice${g.result.achieved?"":" flat"}">
+      <div class="h">${esc(rd.h)}</div><div class="d">${esc(rd.d)}</div></div>
+      <button class="btn ghost" id="reopen">ふりかえりを見る</button>`
+   : (isDue(g)? `<button class="btn" id="close">結果を書く</button>` : "")}
+  ${cap!=null?`<div class="card">
+    <div class="stat"><span>残りの予定</span><b>${mins(rest)}</b></div>
+    <div class="stat"><span>期限までに使える時間</span><b>${mins(cap)}</b></div>
+    <div class="stat"><span>差</span><b style="color:${rest>cap?"var(--red)":"var(--indigo)"}">${
+      rest>cap? "−"+mins(rest-cap) : "+"+mins(cap-rest)}</b></div>
+  </div>${rest>cap?`<div class="hint">入りきっていません。やることを減らすか、期限か、使える時間を見直してください。</div>`:""}`:""}
+  <p class="sec">やること</p>
+  ${all.length? all.map(t=>`<div class="item">
+    <button class="cbx ${t.done?"on":""}" data-done="${t.id}"></button>
+    <div class="body"><div class="tt ${t.done?"done":""}">${esc(t.title)}</div>
+    <div class="mm">${t.planDate? fmt(t.planDate)+"・":""}見積り ${mins(t.estMin)}${
+      t.estEdited? "（書き直した）":""}${t.done&&t.actMin!=null?"　→　実際 "+mins(t.actMin):""}${
+      t.missReason?"　→　"+esc(MISS[t.missReason]):""}</div></div>
+    <button class="chip" data-del="${t.id}">削除</button></div>`).join("")
+    : `<div class="empty">やることがまだありません</div>`}
+  <button class="btn${closed?" ghost":""}" id="add">＋ やることを足す</button>
+  ${(!closed && !isDue(g))?`<button class="btn ghost" id="close2">結果を書いて終わりにする</button>`:""}
+  <button class="btn quiet" id="delg">この目標を削除する</button>`;
+  V.onclick=async e=>{
+    const c=e.target.closest("[data-done]"); if(c) return go("done",{id:c.dataset.done});
+    const d=e.target.closest("[data-del]");
+    if(d){ if(await ask("このやることを削除しますか",{danger:true,okLabel:"削除"})){
+      S.tasks=S.tasks.filter(t=>t.id!==d.dataset.del); await saveNow(); render(); } return; }
+    if(e.target.closest("#add")) return go("taskadd",{goalId:g.id});
+    if(e.target.closest("#close")||e.target.closest("#close2")||e.target.closest("#reopen"))
+      return go("goalclose",{id:g.id});
+    if(e.target.closest("#delg")){
+      if(await ask("この目標を削除しますか",{body:"中のやることも消えます。",danger:true,okLabel:"削除"})){
+        S.goals=S.goals.filter(x=>x.id!==g.id);
+        S.tasks=S.tasks.filter(t=>t.goalId!==g.id);
+        await saveNow(); go("goals");
+      }
+    }
+  };
+}
+
+/* ---------- やることを足す：見積りは必ず自分で書く ---------- */
+function viewTaskAdd(){
+  const g=S.goals.find(x=>x.id===ctx.goalId);
+  if(!g) return go("goals");
+  const d=ctx.draft||{title:"",est:null,date:today()};
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">${esc(g.title)}</p><h1 class="t">やることを足す</h1>
+  <p class="sub">何分かかるかは、自分で決めます。</p></div>
+  <div class="field"><label>やること</label>
+    <input id="ti" type="text" placeholder="関数の基本問題 10問" autocomplete="off" value="${esc(d.title)}"></div>
+  <div class="field"><label>何分かかると思う？</label>
+    <input id="em" type="number" inputmode="numeric" placeholder="30" value="${d.est??""}"></div>
+  <div class="chips" id="q">${[10,15,20,30,45,60,90].map(n=>
+    `<button class="chip${d.est===n?" on":""}" data-m="${n}">${n}分</button>`).join("")}</div>
+  <div class="field" style="margin-top:14px"><label>いつやる？</label>
+    <button type="button" id="dateBtn" style="text-align:left;width:100%;padding:4px 0;font-size:16px">${fmt(d.date,true)}</button></div>
+  <div class="note">見積りを書くと、これまでの記録と見くらべます。<b>見積りを書かないと先に進めません。</b></div>
+  <button class="btn" id="ok">つぎへ</button>
+  <button class="btn quiet" id="back">やめる</button>`;
+  $("#q").onclick=e=>{
+    const b=e.target.closest("[data-m]"); if(!b) return;
+    V.querySelectorAll("#q .chip").forEach(c=>c.classList.remove("on"));
+    b.classList.add("on"); $("#em").value=b.dataset.m;
+  };
+  $("#dateBtn").onclick=()=>{
+    const title=$("#ti").value.trim();
+    const est=parseInt($("#em").value,10)||d.est;
+    go("pickdate",{mode:"task", draft:{title, est, date:d.date}, goalId:g.id, returnRoute:"taskadd"});
+  };
+  $("#ok").onclick=async()=>{
+    const title=$("#ti").value.trim();
+    if(!title) return toast("やることを入れてください");
+    const est=parseInt($("#em").value,10);
+    if(!(est>0)) return toast("何分かかると思うか、入れてください");
+    // 一度この画面に戻ってきた場合、書き直しの履歴を消さない
+    const prev = (d.first!==undefined)? d : null;
+    const draft={ title, est, date:d.date||today(),
+      first: prev? prev.first : est,
+      edits: prev? (prev.edits||0) + (est!==prev.est?1:0) : 0,
+      sawEst: prev? !!prev.sawEst : false,
+      sawPlan: prev? !!prev.sawPlan : false,
+      kinds: prev? (prev.kinds||[]) : [] };
+    const adv=advise({subject:g.subject, estMin:est, planDate:draft.date, goalId:g.id, taskId:null});
+    // 言うことが何も無いときは、確認の画面を出さない。空の画面を見せない。
+    if(!adv.length && !draft.sawEst && !draft.sawPlan){
+      await commitTask(g, draft, adv); toast("足しました"); return go("goal",{id:g.id});
+    }
+    go("taskest",{goalId:g.id, draft});
+  };
+  $("#back").onclick=()=>go("goal",{id:g.id});
+}
+
+async function commitTask(g,d,adv){
+  S.tasks.push({
+    id:uid(), goalId:g.id, title:d.title, planDate:d.date,
+    estMin:d.est, estFirst:d.first, estEdits:d.edits||0, estEdited:(d.edits||0)>0,
+    // 一度でも見た助言を残す。最終状態ではなく、見たかどうかで数える。
+    advised:!!d.sawEst, advisedPlan:!!d.sawPlan, adviceKinds:d.kinds||[],
+    done:false, doneAt:null, actMin:null, missReason:null, recordedAt:null, createdAt:today()
+  });
+  await saveNow();
+}
+
+/* ---------- 期限・実行日をカレンダーから選ぶ ---------- */
+function viewPickDate(){
+  const mode=ctx.mode, d=ctx.draft;
+  if(!d) return go("goals");
+  const field = mode==="goal" ? "deadline" : "date";
+  const heading = mode==="goal"? "期限を選ぶ" : (mode==="move"? "いつに動かす？" : "いつやる？");
+  const ym = ctx.month || ymOf(d[field] || today());
+  const {daysInMonth,startWD}=monthBounds(ym);
+  const markers={};
+  if(mode==="goal"){
+    S.goals.forEach(x=>{ if(x.deadline) markers[x.deadline]=(markers[x.deadline]||0)+1; });
+  }else{
+    S.tasks.filter(t=>t.planDate && !t.done).forEach(t=>{ markers[t.planDate]=(markers[t.planDate]||0)+1; });
+  }
+  const td=today();
+  let cells="";
+  for(let i=0;i<startWD;i++) cells+=`<div class="cal-cell blank"></div>`;
+  for(let day=1; day<=daysInMonth; day++){
+    const ds=`${ym}-${pad(day)}`;
+    const past = ds<td;
+    const sel = ds===d[field];
+    const isToday = ds===td;
+    const n=markers[ds]||0;
+    const full = mode==="task" && !past && n>0 && (plannedOn(ds)+(d.est||0))>dayCapacity(ds);
+    cells+=`<button class="cal-cell${past?" past":""}${sel?" sel":""}${isToday?" today":""}"
+      data-d="${ds}" ${past?"disabled":""}><span class="num">${day}</span>${
+      n?`<span class="dot${full?" full":""}"></span>`:""}</button>`;
+  }
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">${heading}</p>
+  <h1 class="t">${monthLabel(ym)}</h1></div>
+  <div class="calnav"><button class="chip" id="prev">‹ 前の月</button><button class="chip" id="next">次の月 ›</button></div>
+  <div class="calgrid">${WD.map(w=>`<div class="cal-wd">${w}</div>`).join("")}${cells}</div>
+  <div class="hint">${mode==="goal"?
+    "点は、すでにある目標の期限です。":
+    "点は、すでに予定が入っている日です。赤い点は、その日がいっぱいということです。"}</div>
+  <button class="btn quiet" id="back">選ばずに戻る</button>`;
+  $("#prev").onclick=()=>go("pickdate",Object.assign({},ctx,{month:shiftYm(ym,-1)}));
+  $("#next").onclick=()=>go("pickdate",Object.assign({},ctx,{month:shiftYm(ym,1)}));
+  V.querySelectorAll(".cal-cell[data-d]").forEach(b=>{
+    b.onclick=()=>{
+      const nd=Object.assign({},d,{[field]:b.dataset.d});
+      go(ctx.returnRoute, Object.assign({},ctx,{draft:nd, month:undefined}));
+    };
+  });
+  $("#back").onclick=()=>{ if(mode==="move") return go("today");
+    go(ctx.returnRoute, Object.assign({},ctx,{draft:d, month:undefined})); };
+}
+
+/* ---------- 見くらべる。ここが計測点。 ---------- */
+function viewTaskEst(){
+  const g=S.goals.find(x=>x.id===ctx.goalId);
+  const d=ctx.draft;
+  if(!g||!d) return go("goals");
+  const adv=advise({subject:g.subject, estMin:d.est, planDate:d.date, goalId:g.id, taskId:null});
+  const hasSignal=adv.some(a=>a.warn);
+  /* 見た助言は消えない。直したら警告が消えるので、
+     最終状態だけを見ると「助言は出ていなかった」ことになってしまう。
+     そのため、一度でも見たかどうかを下書きに残す。 */
+  d.sawEst  = !!(d.sawEst  || estWarnOf(adv));
+  d.sawPlan = !!(d.sawPlan || planWarnOf(adv));
+  d.kinds   = [...new Set([...(d.kinds||[]), ...adv.filter(a=>a.warn).map(a=>a.k)])];
+  const sug=(adv.find(a=>a.suggest)||{}).suggest;
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">${esc(d.title)}・${fmt(d.date)}</p>
+  <h1 class="t">${mins(d.est)}で できそう？</h1>
+  <p class="sub">${hasSignal? "これまでの記録では、こうでした。" : "これまでの記録と見くらべました。"}${
+    d.edits?`（${d.edits}回書き直し）`:""}</p></div>
+  ${adv.map(a=>`<div class="advice${a.warn?" warn":(a.flat?" flat":"")}">
+    <div class="h">${esc(a.h)}</div><div class="d">${esc(a.d)}</div></div>`).join("")}
+  ${sug&&sug!==d.est?`<button class="btn ghost" id="sug" style="margin-top:14px">${sug}分に直す</button>`:""}
+  <button class="btn" id="keep">${hasSignal?`それでも ${mins(d.est)}でいく`:`${mins(d.est)}で決める`}</button>
+  <div class="field" style="margin-top:16px"><label>自分で数字を決める（分）</label>
+    <input id="em" type="number" inputmode="numeric" value="${d.est}"></div>
+  <button class="btn ghost" id="fix">この数字に直す</button>
+  <button class="btn quiet" id="back">やることの入力に戻る</button>
+  <div class="note">直しても、直さなくても構いません。あとで<b>実際に何分かかったか</b>と見くらべます。</div>`;
+  const redo=v=>go("taskest",{goalId:g.id, draft:Object.assign({},d,{est:v, edits:d.edits+1})});
+  if($("#sug")) $("#sug").onclick=()=>redo(sug);
+  $("#fix").onclick=()=>{
+    const v=parseInt($("#em").value,10);
+    if(!(v>0)) return toast("分を入れてください");
+    if(v===d.est) return toast("同じ数字です");
+    redo(v);
+  };
+  $("#keep").onclick=async()=>{
+    await commitTask(g,d,adv); toast("足しました"); go("goal",{id:g.id});
+  };
+  $("#back").onclick=()=>go("taskadd",{goalId:g.id, draft:d});
+}
+
+/* ---------- ふりかえり ---------- */
+function viewReview(){
+  const dn=doneTasks().slice().sort((a,b)=>(a.doneAt||"").localeCompare(b.doneAt||""));
+  const os=overallStats();
+  const misses={};
+  S.tasks.filter(t=>t.missReason).forEach(t=>{misses[t.missReason]=(misses[t.missReason]||0)+1;});
+
+  const subj=SUBJECTS.map(s=>[s,subjectStats(s)]).filter(([,v])=>v.enough);
+  const st=streakInfo();
+  const bi=badgeInfo();
+
+  V.innerHTML=`
+  <div class="vhead"><h1 class="t">ふりかえり</h1>
+  <p class="sub">比べる相手は、いつも過去の自分です。</p></div>
+  ${dn.length>=2? `<p class="sec">見積りと実際のずれ</p>${chart(dn)}` :
+    `<div class="empty">記録が2件になると、ずれのうつりかわりが出ます</div>`}
+  <div class="card">
+    <div class="stat"><span>記録ストリーク</span><b>${st.n}日</b></div>
+    <div class="stat"><span>やったことの記録</span><b>${dn.length}件</b></div>
+    <div class="stat"><span>ぴったり（ずれ${Math.round(HIT*100)}%以内）</span><b>${bi.hits}回</b></div>
+    ${os.enough?`<div class="stat"><span>実際にかかった時間</span><b>見積りの${Math.round(os.med*100)}%</b></div>`:""}
+    <div class="stat"><span>できなかった記録</span><b>${S.tasks.filter(t=>t.missReason).length}件</b></div>
+  </div>
+  ${os.enough?"":`<div class="note">終わった記録が${MIN_SUBJ}件になると、ずれの真ん中の値を出せるようになります。今は${os.n}件。<br><b>少ない記録で線を引くと、実際より大きく見えてしまいます。</b></div>`}
+
+  <p class="sec">花だん</p>
+  ${gardenCard()}
+  ${(()=>{const g=gardenState(); const bl=(g&&g.bloomed)||[];
+    return bl.length? `<div class="hint">咲いた花：${bl.length}</div><div class="bloomrow">${
+      bl.slice(-12).map(b=>`<div class="b">${plantSVG(b.id,4,42)}<span>${PLANTS[b.id]?PLANTS[b.id].n:""}</span></div>`).join("")
+    }</div>` : `<div class="hint">記録した日に育ちます。ぴったりだった日は、ふつうの2倍のはやさで育ちます。</div>`;})()}
+
+  <p class="sec">称号</p>
+  ${bi.list.length? bi.list.map(b=>`<div class="badge"><div class="h">${b.mark} ${esc(b.label)}</div>
+    <div class="d">${esc(b.detail)}</div></div>`).join("")
+    : `<div class="badge quiet"><div class="h">まだありません</div>
+       <div class="d">見積りとのずれが${Math.round(HIT*100)}%以内になると「ぴったり」、できなかった次の日にまた記録すると「立て直した」がもらえます。順位ではなく、あなた自身の記録にだけ出ます。</div></div>`}
+
+  ${subj.length?`<p class="sec">教科ごとのずれ</p><div class="card">${subj.map(([s,v])=>
+    `<div class="stat"><span>${s}<span style="color:var(--ink-faint)">・${v.n}件</span></span>
+     <b style="color:${v.med>1.15?"var(--red)":(v.med<0.85?"var(--gold)":"var(--indigo)")}">${Math.round(v.med*100)}%</b></div>`
+    ).join("")}</div><div class="hint">100%なら見積りどおり。120%なら、見積りの1.2倍かかっているということ。</div>`:""}
+
+  ${Object.keys(misses).length?`<p class="sec">できなかった理由</p><div class="card">${
+    Object.entries(misses).map(([k,n])=>`<div class="stat"><span>${MISS[k]}</span><b>${n}件</b></div>`).join("")
+  }</div>`:""}
+
+  <p class="sec">目標のふりかえり</p>
+  ${(()=>{
+    const cl=S.goals.filter(isClosed).sort((a,b)=>(b.result.at||"").localeCompare(a.result.at||""));
+    const due=dueGoals();
+    if(!cl.length && !due.length) return `<div class="hint">期限が来た目標は、ここにたまっていきます。</div>`;
+    const hit=cl.filter(g=>g.result.achieved).length;
+    return `${due.length?`<div class="advice warn"><div class="h">結果がまだの目標が${due.length}件あります</div>
+      <div class="d">「目標」から書けます。</div></div>`:""}
+    ${cl.length?`<div class="card">
+      <div class="stat"><span>ふりかえった目標</span><b>${cl.length}件</b></div>
+      <div class="stat"><span>達成した</span><b>${hit}件</b></div>
+    </div>
+    ${cl.slice(0,5).map(g=>{const rd=goalReading(g);
+      return `<div class="advice${g.result.achieved?"":" flat"}" style="margin-top:8px">
+        <div class="h">${esc(g.title)}</div>
+        <div class="d">${g.result.achieved?"達成した":"届かなかった"}・${esc(rd.h)}</div></div>`;}).join("")}
+    <div class="hint">達成できたかどうかと、計画がどこまで進んだかを組み合わせて見ています。達成の数そのものは競うものではありません。</div>`:""}`;
+  })()}
+
+  <p class="sec">見積りの書き直し</p>
+  ${(()=>{
+    const fresh=S.tasks.filter(t=>!t.adviceStale);
+    const stale=S.tasks.length-fresh.length;
+    const adv=fresh.filter(t=>t.advised);
+    const ed=adv.filter(t=>t.estEdited);
+    const plan=fresh.filter(t=>t.advisedPlan);
+    return `<div class="card">
+      <div class="stat"><span>見積りを書いた回数</span><b>${fresh.length}回</b></div>
+      <div class="stat"><span>記録と食いちがった回数</span><b>${adv.length}回</b></div>
+      <div class="stat"><span>そのうち、書き直した回数</span><b>${ed.length}回</b></div>
+      ${plan.length?`<div class="stat"><span>置き場所を指摘された回数</span><b>${plan.length}回</b></div>`:""}
+    </div>
+    ${adv.length? `<div class="hint">食いちがったうち ${Math.round(ed.length/adv.length*100)}% を書き直しています。</div>`
+      : `<div class="hint">まだ、これまでの記録と食いちがったことはありません。</div>`}
+    ${stale? `<div class="hint">古い方式で記録した${stale}件は、数え方が変わったため上の集計に入れていません。</div>`:""}`;
+  })()}
+  <div class="note">このアプリは点数をつけません。順位も出しません。予測もしません。
+  出しているのは、あなたが書いた数字と、実際にかかった時間だけです。</div>`;
+}
+function chart(list){
+  const W=300,H=112,P=8;
+  const rs=list.map(t=>Math.min(250, Math.round(t.actMin/t.estMin*100)));
+  const y=v=>H-10-((v-0)/250)*(H-24);
+  const pts=rs.map((v,i)=>[rs.length===1? W/2 : P+i*(W-P*2)/(rs.length-1), y(v)]);
+  const line=pts.map(p=>p.map(n=>n.toFixed(1)).join(",")).join(" ");
+  const y100=y(100);
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:122px" role="img" aria-label="見積りと実際のずれ">
+    <line x1="0" y1="${H-10}" x2="${W}" y2="${H-10}" stroke="#E4E1D8"/>
+    <line x1="0" y1="${y100.toFixed(1)}" x2="${W}" y2="${y100.toFixed(1)}" stroke="#B8860B" stroke-dasharray="3 3"/>
+    <polyline points="${line}" fill="none" stroke="#2A5D8A" stroke-width="2.2" stroke-linejoin="round"/>
+    ${pts.map((p,i)=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.6"
+      fill="${rs[i]>115?"#D9342A":"#2A5D8A"}"/>`).join("")}
+  </svg>
+  <div class="hint" style="display:flex;justify-content:space-between">
+    <span>${fmt(list[0].doneAt)}</span><span>金色の線＝見積りどおり（100%）</span>
+    <span>${fmt(list[list.length-1].doneAt)}</span></div>
+  ${list.length<MIN_TREND?`<div class="hint">記録が${MIN_TREND}件になるまでは、上がった下がったの判断はしないでください。</div>`:""}`;
+}
+
+/* ---------- 設定 ---------- */
+function viewSet(){
+  V.innerHTML=`
+  <div class="vhead"><h1 class="t">設定</h1><p class="sub">${esc(S.student.name)}・${esc(S.student.grade)}</p></div>
+  <p class="sec">1日に勉強に使える時間</p>
+  <div class="field"><label>平日（月〜金）</label><input id="wd" type="number" inputmode="numeric" value="${S.settings.weekdayMin}"></div>
+  <div class="field"><label>休日（土日）</label><input id="we" type="number" inputmode="numeric" value="${S.settings.weekendMin}"></div>
+  <button class="btn ghost" id="sv">時間を保存する</button>
+  <p class="sec">パスコード</p>
+  <button class="btn ghost" id="pin">${hasPin()? "パスコードを変える／やめる" : "パスコードをつける"}</button>
+  <div class="hint">${hasPin()? "開くときに4けたの数字を聞きます。" : "開くときに4けたの数字を聞くようにできます。"}</div>
+  <p class="sec">記録</p>
+  <button class="btn ghost" id="pdf">記録をPDFにする</button>
+  <div class="hint">画面で中身を確かめてから、PDFにできます。</div>
+  <button class="btn quiet" id="rs">すべての記録を消す</button>
+  <div class="note">保存先：${Store.persistent()?"この端末（IndexedDB）":"<b>一時的な保存のみ</b>。閉じると消えます。"}<br>
+  版：${APP_VERSION}<br>
+  このアプリは通信しません。記録が外に送られることはありません。AIも使いません。</div>`;
+  $("#sv").onclick=async()=>{
+    const wd=parseInt($("#wd").value,10), we=parseInt($("#we").value,10);
+    if(!(wd>0)||!(we>0)) return toast("分を入れてください");
+    S.settings.weekdayMin=wd; S.settings.weekendMin=we;
+    await saveNow(); toast("保存しました");
+  };
+  $("#pdf").onclick=()=>go("sheet");
+  $("#pin").onclick=()=>go("pin");
+  $("#rs").onclick=async()=>{
+    if(await ask("すべての記録を消しますか",{body:"元に戻せません。",danger:true,okLabel:"消す"})){
+      S=blank(); advanceGarden(); await saveNow(); go("today");
+    }
+  };
+}
+
+/* ============================================================
+   PDF書き出し（依存ゼロ）
+
+   日本語のフォントをPDFに埋め込むことはできない（外部ファイルを
+   読み込まない方針のため）。そこでシートをキャンバスに描き、
+   その画像をPDFに収める。文字はOSのフォントで描かれるので、
+   日本語がそのまま出る。
+
+   window.print() に頼らないので、印刷に対応していない
+   アプリ内ブラウザでもファイルとして保存できる。
+   ============================================================ */
+const PDF_W=1240, PDF_H=1754;            // A4 を150dpi相当で
+const PG={ m:70, line:30, pad:11, body:"22px", small:"20px" };
+const FONTS='-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",sans-serif';
+
+function wrapText(ctx,text,w){
+  const out=[]; let line="";
+  for(const ch of String(text==null?"":text)){
+    if(ch==="\n"){ out.push(line); line=""; continue; }
+    const t=line+ch;
+    if(ctx.measureText(t).width>w && line){ out.push(line); line=ch; }
+    else line=t;
+  }
+  out.push(line);
+  return out;
+}
+/* シートの中身を、描画しやすい形の並びにする */
+function sheetBlocks(){
+  const dn=doneTasks(), os=overallStats(), st=streakInfo();
+  const misses=S.tasks.filter(t=>t.missReason);
+  const B=[];
+  B.push({t:"h1", text:`${S.student.name}の学習記録`});
+  B.push({t:"meta", text:`${fmt(today(),true)} 作成　／　${S.student.grade||""}`});
+  B.push({t:"sec", text:"まとめ"});
+  B.push({t:"table", cols:[.32,.16,.32,.20], head:null, rows:[
+    ["記録が続いている日数", `${st.n}日`, "やったことの記録", `${dn.length}件`],
+    ["できなかった記録", `${misses.length}件`, "見積りに対する実際",
+      os.enough? `${Math.round(os.med*100)}%` : "記録が少ないため出しません"]
+  ], keyCols:[0,2]});
+  B.push({t:"sec", text:"目標"});
+  B.push({t:"table", cols:[.21,.07,.15,.11,.17,.09,.20],
+    head:["目標","教科","期限","やること","備考","結果","読み方"],
+    rows: S.goals.length? S.goals.map(g=>{
+      const all=S.tasks.filter(t=>t.goalId===g.id);
+      const rd=goalReading(g);
+      return [g.title, g.subject, g.deadline||"—",
+        `${all.filter(t=>t.done).length} / ${all.length}`,
+        isClosed(g)&&g.result.note? g.result.note : "—",
+        isClosed(g)? (g.result.achieved?"達成":"届かず") : "進行中",
+        rd? rd.h : ""];
+    }) : [["まだ目標がありません","","","","","",""]]});
+  B.push({t:"sec", text:"見積りと実際"});
+  const rows=S.tasks.slice().filter(t=>t.done||t.missReason)
+    .sort((a,b)=>(a.recordedAt||"").localeCompare(b.recordedAt||""))
+    .map(t=>{
+      const g=goalOf(t);
+      const over=t.done&&t.actMin!=null&&t.actMin>t.estMin;
+      return [t.recordedAt||"", g?g.subject:"", t.title, `${t.estMin}分`,
+        t.done&&t.actMin!=null? `${t.actMin}分`:"—",
+        t.done&&t.actMin!=null? (over?"+":"")+(t.actMin-t.estMin)+"分" : "—",
+        t.missReason? MISS[t.missReason] : ""];
+    });
+  B.push({t:"table", cols:[.15,.07,.27,.09,.09,.10,.23],
+    head:["日付","教科","やること","見積り","実際","ずれ","できなかった理由"],
+    rows: rows.length? rows : [["まだ記録がありません","","","","","",""]],
+    redCol:5});
+  B.push({t:"foot", text:"このアプリは点数や順位をつけません。上の数字は、すべて本人が書いた見積りと、実際にかかった時間から計算したものです。"});
+  return B;
+}
+function sheetPages(){
+  const blocks=sheetBlocks();
+  const CW=PDF_W-PG.m*2;
+  const pages=[]; let cv=null, ctx=null, y=0;
+  const newPage=()=>{
+    cv=document.createElement("canvas"); cv.width=PDF_W; cv.height=PDF_H;
+    ctx=cv.getContext("2d");
+    ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,PDF_W,PDF_H);
+    ctx.textBaseline="top";
+    pages.push(cv); y=PG.m;
+  };
+  const room=h=> y+h <= PDF_H-PG.m;
+  newPage();
+  /* 1行を描く。ページをまたぐときは、表のヘッダーを引き継ぐ。 */
+  const put=(cells,cols,o)=>{
+    o=o||{};
+    const ws=cols.map(f=>CW*f);
+    const setFont=bold=>{ ctx.font=(bold?"600 ":"")+PG.body+" "+FONTS; };
+    setFont(o.bold);
+    const lines=cells.map((c,i)=>wrapText(ctx,c,ws[i]-PG.pad*2));
+    const h=Math.max(...lines.map(l=>l.length))*PG.line+PG.pad*2;
+    if(!room(h)){
+      newPage();
+      if(o.head) put(o.head,cols,{bold:true});
+      setFont(o.bold);
+    }
+    let x=PG.m;
+    cells.forEach((c,i)=>{
+      const key=o.bold || (o.keyCols && o.keyCols.includes(i));
+      if(key){ ctx.fillStyle="#f0eee7"; ctx.fillRect(x,y,ws[i],h); }
+      ctx.strokeStyle="#c9c4b6"; ctx.lineWidth=1.5; ctx.strokeRect(x,y,ws[i],h);
+      setFont(key);
+      ctx.fillStyle=(o.red!=null && i===o.red && /^\+/.test(String(c)))? "#D9342A" : "#1A1D21";
+      lines[i].forEach((ln,k)=>ctx.fillText(ln, x+PG.pad, y+PG.pad+k*PG.line));
+      x+=ws[i];
+    });
+    y+=h;
+  };
+  blocks.forEach(b=>{
+    if(b.t==="h1"){
+      ctx.font="700 44px "+FONTS; ctx.fillStyle="#1A1D21";
+      if(!room(56)) newPage();
+      ctx.fillText(b.text,PG.m,y); y+=56;
+    }else if(b.t==="meta"){
+      ctx.font=PG.small+" "+FONTS; ctx.fillStyle="#5A6169";
+      ctx.fillText(b.text,PG.m,y); y+=44;
+    }else if(b.t==="sec"){
+      if(!room(70)) newPage();
+      y+=16;
+      ctx.font="700 26px "+FONTS; ctx.fillStyle="#5A6169";
+      ctx.fillText(b.text,PG.m,y); y+=40;
+    }else if(b.t==="table"){
+      if(b.head) put(b.head,b.cols,{bold:true});
+      b.rows.forEach(r=>put(r,b.cols,{red:b.redCol, keyCols:b.keyCols, head:b.head}));
+      y+=10;
+    }else if(b.t==="foot"){
+      ctx.font=PG.small+" "+FONTS; ctx.fillStyle="#5A6169";
+      const lines=wrapText(ctx,b.text,CW);
+      if(!room(lines.length*30+20)) newPage();
+      y+=18;
+      lines.forEach((ln,k)=>ctx.fillText(ln,PG.m,y+k*30));
+      y+=lines.length*30;
+    }
+  });
+  return pages;
+}
+function dataURLBytes(u){
+  const b64=u.slice(u.indexOf(",")+1), bin=atob(b64);
+  const out=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+  return out;
+}
+/* 画像を1ページずつ入れた、最小構成のPDFを組み立てる */
+function pdfFromCanvases(cvs){
+  const enc=new TextEncoder(), chunks=[]; let pos=0;
+  const w=x=>{ const b=(typeof x==="string")? enc.encode(x) : x; chunks.push(b); pos+=b.length; };
+  const off=[]; const N=2+cvs.length*3;
+  const PW=595.28, PH=841.89;
+  w("%PDF-1.4\n");
+  off[1]=pos; w("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+  const kids=cvs.map((_,i)=>`${3+i*3} 0 R`).join(" ");
+  off[2]=pos; w(`2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${cvs.length} >>\nendobj\n`);
+  cvs.forEach((c,i)=>{
+    const pn=3+i*3, cn=4+i*3, im=5+i*3;
+    const jpg=dataURLBytes(c.toDataURL("image/jpeg",0.88));
+    off[pn]=pos; w(`${pn} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] `
+      +`/Resources << /XObject << /Im0 ${im} 0 R >> >> /Contents ${cn} 0 R >>\nendobj\n`);
+    const cs=`q ${PW} 0 0 ${PH} 0 0 cm /Im0 Do Q`;
+    off[cn]=pos; w(`${cn} 0 obj\n<< /Length ${cs.length} >>\nstream\n${cs}\nendstream\nendobj\n`);
+    off[im]=pos; w(`${im} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${c.width} /Height ${c.height} `
+      +`/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`);
+    w(jpg); w("\nendstream\nendobj\n");
+  });
+  const xref=pos;
+  let x=`xref\n0 ${N+1}\n0000000000 65535 f \n`;
+  for(let i=1;i<=N;i++) x+=String(off[i]).padStart(10,"0")+" 00000 n \n";
+  x+=`trailer\n<< /Size ${N+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  w(x);
+  return new Blob(chunks,{type:"application/pdf"});
+}
+function makePdf(){
+  const pages=sheetPages();
+  return {blob:pdfFromCanvases(pages), pages:pages.length};
+}
+/* ---------- パスコードの設定 ---------- */
+function viewPin(){
+  const on=hasPin();
+  const st={a:"", b:"", stage: on? "check" : "new"};
+  const titles={check:"いまのパスコード", new:"新しいパスコード（4けた）", again:"もう一度"};
+  const paint=()=>{
+    const cur = st.stage==="again"? st.b : st.a;
+    V.innerHTML=`
+    <div class="vhead"><p class="eyebrow">${on?"パスコードを変える／やめる":"パスコードをつける"}</p>
+    <h1 class="t" style="font-size:22px">${titles[st.stage]}</h1></div>
+    <div class="dots">${Array.from({length:PIN_LEN},(_,i)=>
+      `<i class="${i<cur.length?"on":""}"></i>`).join("")}</div>
+    <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button data-n="${n}">${n}</button>`).join("")}
+      <button class="fn" id="del">けす</button><button data-n="0">0</button>
+      <button class="fn" id="cancel">やめる</button></div>
+    ${on&&st.stage==="check"?`<button class="btn quiet" id="off">パスコードをやめる</button>`:""}
+    <div class="note">この端末の中だけの目隠しです。<b>記録そのものは暗号にしていません。</b>
+    ${(window.crypto&&crypto.subtle)?"":"<br>この開き方ではかんたんな計算しか使えません。ブラウザで開くとより丈夫になります。"}<br>
+    忘れると、記録を取り出す方法はありません。</div>`;
+    V.querySelectorAll("[data-n]").forEach(b=>b.onclick=()=>tap(b.dataset.n));
+    V.querySelector("#del").onclick=()=>{ set(cur.slice(0,-1)); paint(); };
+    V.querySelector("#cancel").onclick=()=>go("set");
+    const off=V.querySelector("#off");
+    if(off) off.onclick=()=>{ st.stage="check"; st.mode="off"; toast("いまのパスコードを入れてください"); };
+  };
+  const set=v=>{ if(st.stage==="again") st.b=v; else st.a=v; };
+  const tap=async n=>{
+    const cur = st.stage==="again"? st.b : st.a;
+    if(cur.length>=PIN_LEN) return;
+    set(cur+n); paint();
+    const now = st.stage==="again"? st.b : st.a;
+    if(now.length<PIN_LEN) return;
+    if(st.stage==="check"){
+      const got=await hashPin(now, S.settings.pin.salt);
+      if(got.h!==S.settings.pin.h){ st.a=""; paint(); return toast("ちがいます"); }
+      if(st.mode==="off"){
+        delete S.settings.pin; S.settings.pinFails=0; S.settings.pinUntil=0;
+        await saveNow(); toast("パスコードをやめました"); return go("set");
+      }
+      st.a=""; st.stage="new"; paint(); return;
+    }
+    if(st.stage==="new"){ st.stage="again"; st.b=""; paint(); return; }
+    if(st.stage==="again"){
+      if(st.b!==st.a){ st.b=""; paint(); return toast("そろっていません。もう一度"); }
+      const salt=randSalt();
+      const got=await hashPin(st.a, salt);
+      S.settings.pin={salt, h:got.h, algo:got.algo};
+      S.settings.pinFails=0; S.settings.pinUntil=0;
+      unlocked=true;
+      await saveNow(); toast("パスコードをつけました"); go("set");
+    }
+  };
+  paint();
+}
+
+/* ---------- パスコードの画面 ---------- */
+function viewLock(){
+  TABS.classList.add("hide");
+  const wait=lockLeft();
+  const st={pin:"", bad:false};
+  const paint=()=>{
+    const w=lockLeft();
+    V.innerHTML=`<div class="lockwrap">
+      <div style="text-align:center">
+        <p class="eyebrow">プランメイト</p>
+        <h1 class="t" style="font-size:22px">${w? "しばらく待ってください" : "パスコードを入れてください"}</h1>
+        ${w? `<p class="sub">あと${w}秒</p>` : ""}
+      </div>
+      <div class="dots${st.bad?" bad":""}">${
+        Array.from({length:PIN_LEN},(_,i)=>`<i class="${i<st.pin.length?"on":""}"></i>`).join("")}</div>
+      <div class="pad">${
+        [1,2,3,4,5,6,7,8,9].map(n=>`<button data-n="${n}" ${w?"disabled":""}>${n}</button>`).join("")
+        }<button class="fn" id="del" ${w?"disabled":""}>けす</button>
+         <button data-n="0" ${w?"disabled":""}>0</button>
+         <button class="fn" id="help">わすれた</button></div>
+    </div>`;
+    V.querySelectorAll("[data-n]").forEach(b=>b.onclick=()=>tap(b.dataset.n));
+    V.querySelector("#del").onclick=()=>{ st.pin=st.pin.slice(0,-1); st.bad=false; paint(); };
+    V.querySelector("#help").onclick=forgot;
+  };
+  const tap=async n=>{
+    if(lockLeft()) return;
+    st.bad=false;
+    if(st.pin.length>=PIN_LEN) return;
+    st.pin+=n; paint();
+    if(st.pin.length<PIN_LEN) return;
+    const p=S.settings.pin;
+    const got=await hashPin(st.pin, p.salt);
+    if(got.h===p.h){
+      unlocked=true;
+      S.settings.pinFails=0; S.settings.pinUntil=0;
+      await saveNow(); go("today"); return;
+    }
+    const n2=(S.settings.pinFails||0)+1;
+    S.settings.pinFails=n2;
+    const pen=lockPenalty(n2);
+    if(pen) S.settings.pinUntil=Date.now()+pen;
+    await saveNow();
+    st.pin=""; st.bad=true; paint();
+    toast(pen? "まちがいが続いたので、少し待ってください" : "ちがいます");
+    if(pen){ const t=setInterval(()=>{ if(!lockLeft()){ clearInterval(t); } paint(); },1000); }
+  };
+  const forgot=async()=>{
+    if(await ask("パスコードを忘れたときは",{
+      body:"記録はこの端末の中にしかないので、取り出す方法はありません。全部消して、はじめからやり直すことだけができます。",
+      okLabel:"全部消してやり直す", danger:true})){
+      S=blank(); advanceGarden(); unlocked=true; await saveNow(); go("today");
+    }
+  };
+  paint();
+}
+
+/* ---------- 記録シート：作られるPDFをそのまま見せる ---------- */
+let sheetCache=null;
+function viewSheet(){
+  sheetCache=null;
+  V.innerHTML=`
+  <div class="vhead"><p class="eyebrow">記録シート</p><h1 class="t">PDFにする</h1>
+  <p class="sub">下に出るものが、そのままPDFになります。</p></div>
+  <button class="btn" id="dl">PDFを保存する</button>
+  <button class="btn ghost" id="op">PDFを開く</button>
+  <div class="note">「保存する」でPDFファイルができます。うまく保存できないときは
+  「開く」を押すと、その場でPDFが出るので、そこから共有や保存ができます。</div>
+  <div class="pdfprev" id="prev"><div class="empty">つくっています…</div></div>
+  <button class="btn quiet" id="back">設定に戻る</button>`;
+  $("#back").onclick=()=>go("set");
+  const build=()=>{
+    if(sheetCache) return sheetCache;
+    try{ sheetCache=sheetPages(); }
+    catch(e){ console.error(e); toast("シートを作れませんでした"); sheetCache=null; }
+    return sheetCache;
+  };
+  // 描画に少しかかるので、画面を出してから作る
+  setTimeout(()=>{
+    const pages=build();
+    const el=V.querySelector("#prev"); if(!el) return;
+    if(!pages){ el.innerHTML=`<div class="empty">シートを作れませんでした</div>`; return; }
+    el.innerHTML=pages.map((c,i)=>
+      `<img class="pdfpage" src="${c.toDataURL("image/jpeg",0.7)}" alt="${i+1}ページ目">`
+      +`<div class="pdfnote">${i+1} / ${pages.length} ページ</div>`).join("");
+  },30);
+  const withPdf=fn=>{
+    const pages=build(); if(!pages) return;
+    let blob;
+    try{ blob=pdfFromCanvases(pages); }
+    catch(e){ console.error(e); return toast("PDFを作れませんでした"); }
+    fn(blob, pages.length);
+  };
+  $("#dl").onclick=()=>withPdf((blob,n)=>{
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download=`学習記録-${today()}.pdf`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    toast(`PDFを作りました（${n}ページ）`);
+  });
+  $("#op").onclick=()=>withPdf(blob=>{
+    const url=URL.createObjectURL(blob);
+    const win=window.open(url,"_blank");
+    if(!win) location.href=url;
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  });
+}
+
+/* ============================================================
+   8. 起動
+   ============================================================ */
+(async()=>{
+  await Store.open();
+  const raw=await Store.get();
+  if(!raw){ S=blank(); }
+  else{
+    const r=migrate(raw);
+    if(r.error){
+      S=blank();
+      document.getElementById("view").innerHTML=
+        `<div class="vhead"><h1 class="t">記録を読めませんでした</h1></div>
+         <div class="note">新しく始めることはできますが、前の記録は表示できません。</div>`;
+    }else S=r.state;
+  }
+  if(S.student) advanceGarden();
+  render();
+})();
+</script>
+</body>
+</html>
