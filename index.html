@@ -1244,7 +1244,9 @@ function render(){
     const b3=V.querySelector("#rs2");
     if(b3) b3.onclick=async()=>{
       if(await ask("すべての記録を消しますか",{body:"元に戻せません。",danger:true,okLabel:"消す"})){
-        S=blank(); advanceGarden(); await saveNow(); go("today");
+        S=blank(); advanceGarden();
+        if(await saveNow()){ toast("消しました"); go("today"); }
+        else toast("いまは消せませんでした。開き直してから、もう一度お試しください");
       }
     };
   }
@@ -1291,6 +1293,14 @@ function paintTabs(active){
   TABS.querySelectorAll("[data-tab]").forEach(b=>
     b.classList.toggle("on", b.dataset.tab===active));
 }
+/* 行は role="button" として出しているので、Enter と Space でも動くようにする。
+   見た目だけ押せるようにして、実際には押せない場所を作らない。 */
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Enter" && e.key!==" ") return;
+  const t=e.target;
+  if(!t || !t.matches || !t.matches('[role="button"][data-done]')) return;
+  e.preventDefault(); t.click();
+});
 TABS.addEventListener("click",e=>{
   const b=e.target.closest("[data-tab]"); if(b) go(b.dataset.tab);
 });
@@ -1505,7 +1515,7 @@ function viewApplyMove(){
   if(nd!==t.planDate) t.planDate=nd;
   go("today");
   /* 先に画面を戻してから保存する。書けたと分かってから伝える。 */
-  saveNow().then(ok=>{ if(ok!==false) toast(`${fmt(nd)}に動かしました`); })
+  saveNow().then(()=>toast(`${fmt(nd)}に動かしました`))
            .catch(e=>console.error(e));
 }
 
@@ -1797,15 +1807,17 @@ function viewTaskAdd(){
     const adv=advise({subject:g.subject, estMin:est, planDate:draft.date, goalId:g.id, taskId:null});
     // 言うことが何も無いときは、確認の画面を出さない。空の画面を見せない。
     if(!adv.length && !draft.sawEst && !draft.sawPlan){
-      await commitTask(g, draft, adv); toast("足しました"); return go("goal",{id:g.id});
+      if(!await commitTask(g, draft, adv)) return;
+      toast("足しました"); return go("goal",{id:g.id});
     }
     go("taskest",{goalId:g.id, draft});
   };
   $("#back").onclick=()=>go("goal",{id:g.id});
 }
 
+/* 足せたかどうかを返す。0分のまま通すと、あとで「ずれ」が出せなくなる。 */
 async function commitTask(g,d,adv){
-  if(!(d.est>0)) return toast("何分かかると思うか、入れてください");   // 0分では記録が意味を持たない
+  if(!(d.est>0)){ toast("何分かかると思うか、入れてください"); return false; }
   S.tasks.push({
     id:uid(), goalId:g.id, title:d.title, planDate:d.date,
     estMin:d.est, estFirst:d.first, estEdits:d.edits||0, estEdited:(d.edits||0)>0,
@@ -1814,6 +1826,7 @@ async function commitTask(g,d,adv){
     done:false, doneAt:null, actMin:null, missReason:null, recordedAt:null, createdAt:today()
   });
   await saveNow();
+  return true;
 }
 
 /* ---------- 期限・実行日をカレンダーから選ぶ ---------- */
@@ -1922,7 +1935,8 @@ function viewTaskEst(){
     redo(v);
   };
   $("#keep").onclick=async()=>{
-    await commitTask(g,d,adv); toast("足しました"); go("goal",{id:g.id});
+    if(!await commitTask(g,d,adv)) return;
+    toast("足しました"); go("goal",{id:g.id});
   };
   $("#back").onclick=()=>go("taskadd",{goalId:g.id, draft:d});
 }
@@ -2161,7 +2175,7 @@ function viewSet(){
   ${S.settings.backupAt? `前回の書き出し：${fmt(S.settings.backupAt,true)}` : "まだ書き出していません。"}</div>
   <button class="btn ghost" id="rest">バックアップを読み込む</button>
   <div class="hint">この端末に無い記録だけを足します。いまある記録は書き換えません。</div>
-  <input type="file" id="file" accept="application/json,.json" class="hidden">
+  <input type="file" id="file" accept=".json,application/json,text/plain" class="hidden">
   <div class="note"><b>記録はこの端末の中にしかありません。</b>
   端末を替えたときや、しばらく開かずに端末の掃除で消えたときは、バックアップがないと戻せません。
   月に一度、書き出してクラウドやパソコンに置いておくことをすすめます。<br>
@@ -2356,8 +2370,11 @@ function sheetBlocks(r){
          7月のシートに4月からの数が載って、期間の意味が消える。 */
       const all=S.tasks.filter(t=>t.goalId===g.id &&
         (inRange(t.recordedAt,r) || inRange(t.planDate,r)));
+      /* 「終えた」は、その期間に記録したものだけ。7月に予定して8月に
+         終えたものを7月のシートに入れると、数が合わなくなる。 */
+      const dn=all.filter(t=>t.done && inRange(t.recordedAt,r)).length;
       return [g.title, g.subject, g.deadline? fmt(g.deadline,true) : "—",
-        `${all.filter(t=>t.done).length} / ${all.length}`,
+        `${dn} / ${all.length}`,
         isClosed(g)? (g.result.achieved?"達成":"届かず") : "進行中"];
     }) : [["この期間に関わる目標はありません","","","",""]]});
   B.push({t:"foot", text:"このシートは、期間のまとめだけを出したものです。点数や順位はつけません。"
@@ -2698,7 +2715,11 @@ function bootFailed(title, body){
   if(b3) b3.onclick=async()=>{
     if(await ask("すべての記録を消しますか",{body:"元に戻せません。",danger:true,okLabel:"消す"})){
       Store.unseal();
-      S=blank(); advanceGarden(); unlocked=true; await saveNow(); go("today");
+      S=blank(); advanceGarden(); unlocked=true;
+      /* 保存先そのものに手が届いていないときは、消せていない。
+         そのまま始めさせると、次に開いたときまた同じ画面になる。 */
+      if(await saveNow()){ toast("消しました"); go("today"); }
+      else toast("いまは消せませんでした。開き直してから、もう一度お試しください");
     }
   };
 }
